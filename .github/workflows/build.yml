@@ -1,0 +1,71 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'          # triggers on v1.0.1, v1.2.0, etc.
+  workflow_dispatch:  # manual run from the Actions tab
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Read version from csproj
+        id: version
+        shell: pwsh
+        run: |
+          [xml]$csproj = Get-Content WinScrobb.csproj
+          $ver = $csproj.Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1
+          if (-not $ver) { $ver = "0.0.0" }
+          echo "VERSION=$ver" >> $env:GITHUB_OUTPUT
+
+      - name: Publish self-contained EXE
+        run: >
+          dotnet publish -c Release -r win-x64
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -o publish
+
+      - name: Install Inno Setup
+        run: |
+          $url = "https://github.com/jrsoftware/issrc/releases/download/is-6_7_1/innosetup-6.7.1.exe"
+          $out = "$env:TEMP\innosetup.exe"
+          Invoke-WebRequest $url -OutFile $out -UseBasicParsing
+          Start-Process $out "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART" -Wait
+
+      - name: Build installer
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WinScrobb-Setup-${{ steps.version.outputs.VERSION }}
+          path: installer/WinScrobb-Setup.exe
+          if-no-files-found: error
+
+      # Only create a GitHub Release when triggered by a version tag
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: WinScrobb ${{ steps.version.outputs.VERSION }}
+          body: |
+            ## WinScrobb ${{ steps.version.outputs.VERSION }}
+
+            Download **WinScrobb-Setup.exe** below and run it to install.
+
+            **Requires Windows 10 20H1 (build 19041) or later.**
+          files: installer/WinScrobb-Setup.exe
+          draft: false
+          prerelease: false

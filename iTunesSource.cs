@@ -28,7 +28,9 @@ public static class iTunesSource
         if (Process.GetProcessesByName("iTunes").Length == 0)
             return null;
 
-        dynamic? iTunes = TryGetActiveObject() ?? TryCreateInstance();
+        // Only use GetActiveObject (ROT lookup) — CreateInstance via ProgID can
+        // relaunch iTunes if it deregistered from the ROT after quitting.
+        dynamic? iTunes = TryGetActiveObject();
         if (iTunes == null) return null;
 
         try
@@ -73,15 +75,4 @@ public static class iTunesSource
         catch { return null; }
     }
 
-    private static dynamic? TryCreateInstance()
-    {
-        try
-        {
-            // Activator.CreateInstance via ProgID connects to the running iTunes STA instance
-            // rather than launching a new one (COM routes to the existing server).
-            var type = Type.GetTypeFromProgID("iTunes.Application");
-            return type is null ? null : Activator.CreateInstance(type);
-        }
-        catch { return null; }
-    }
 }

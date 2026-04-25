@@ -21,12 +21,15 @@ public class TrayPopup : Form
 
     private const int W = 300;
 
+    // Set to true while a child dialog is open so OnDeactivate doesn't close the popup
+    private bool _childOpen;
+
     // Segoe MDL2 Assets codepoints kept as string literals so the editor
     // can't mangle them — use explicit \u escapes throughout this file.
-    private static readonly string GlyphMusic    = ""; // MusicNote
-    private static readonly string GlyphSettings = ""; // Settings
-    private static readonly string GlyphLog      = ""; // ViewAll
-    private static readonly string GlyphQuit     = ""; // PowerButton
+    private static readonly string GlyphMusic    = ""; // MusicNote
+    private static readonly string GlyphSettings = ""; // Settings
+    private static readonly string GlyphLog      = ""; // ViewAll
+    private static readonly string GlyphQuit     = ""; // PowerButton
 
     public TrayPopup(string username, string? nowPlaying, string? nowPlayingArtist, bool isLoved = false)
     {
@@ -56,7 +59,9 @@ public class TrayPopup : Form
         y = AddMenuItem(y, GlyphSettings, "Settings…", () => { Close(); SettingsRequested?.Invoke(this, EventArgs.Empty); });
         y = AddMenuItem(y, GlyphLog,      "View Log…", ShowLog);
 
+        // Extra gap before Quit — makes it harder to accidentally hit
         AddDivider(ref y);
+        y += 6;
 
         y = AddMenuItem(y, GlyphQuit, "Quit", () => { Close(); QuitRequested?.Invoke(this, EventArgs.Empty); });
 
@@ -149,7 +154,6 @@ public class TrayPopup : Form
             });
 
             // ── Heart / love button ───────────────────────────────────────────
-            // ♥ = ♥ filled, ♡ = ♡ outline
             bool loved = isLoved;
             var heart = new Label
             {
@@ -219,36 +223,123 @@ public class TrayPopup : Form
 
     private void ShowLog()
     {
+        _childOpen = true;
         Close();
-        var text = LogEntries.Count == 0 ? "(no log entries yet)"
-                                         : string.Join(Environment.NewLine, LogEntries);
+
+        var isDark = FluentTheme.IsDarkMode();
+        var bg     = isDark ? Color.FromArgb(18, 18, 18) : Color.FromArgb(248, 248, 248);
+        var fg     = isDark ? Color.FromArgb(212, 212, 212) : Color.FromArgb(24, 24, 24);
+        var hdrBg  = isDark ? Color.FromArgb(28, 28, 28) : Color.FromArgb(238, 238, 238);
+
         using var dlg = new Form
         {
-            Text          = "WinScrobb — Log",
-            Size          = new Size(620, 420),
+            Text          = "WinScrobb — Activity Log",
+            Size          = new Size(680, 480),
+            MinimumSize   = new Size(480, 320),
             StartPosition = FormStartPosition.CenterScreen,
-            BackColor     = FluentTheme.Surface,
-            ForeColor     = FluentTheme.TextPrimary,
+            BackColor     = bg,
+            ForeColor     = fg,
             Font          = FluentTheme.Body(),
         };
         dlg.Load += (_, _) => FluentTheme.ApplyChrome(dlg);
         var icoPath = FluentTheme.FindAsset("icon.ico");
         if (icoPath != null) try { dlg.Icon = new Icon(icoPath); } catch { }
 
-        dlg.Controls.Add(new TextBox
+        // ── Header bar ────────────────────────────────────────────────────────
+        var header = new Panel { Dock = DockStyle.Top, Height = 50, BackColor = hdrBg };
+
+        var logoPath = FluentTheme.FindAsset("logosmall.png");
+        if (logoPath != null)
+            header.Controls.Add(new PictureBox
+            {
+                Image     = Image.FromFile(logoPath),
+                SizeMode  = PictureBoxSizeMode.Zoom,
+                Size      = new Size(22, 22),
+                Location  = new Point(14, 14),
+                BackColor = Color.Transparent,
+            });
+
+        header.Controls.Add(new Label
         {
-            Multiline   = true,
-            ScrollBars  = ScrollBars.Vertical,
+            Text      = "Activity Log",
+            Font      = FluentTheme.Subtitle(11f),
+            ForeColor = fg,
+            AutoSize  = true,
+            Location  = new Point(logoPath != null ? 44 : 14, 15),
+            BackColor = Color.Transparent,
+        });
+
+        // Entry count, right-aligned, updates when layout runs
+        var countLbl = new Label
+        {
+            Text      = $"{LogEntries.Count} entries",
+            Font      = FluentTheme.Caption(8f),
+            ForeColor = FluentTheme.TextMuted,
+            AutoSize  = true,
+            BackColor = Color.Transparent,
+        };
+        header.Controls.Add(countLbl);
+        header.Layout += (_, _) =>
+            countLbl.Location = new Point(header.Width - countLbl.Width - 14,
+                                          (header.Height - countLbl.Height) / 2);
+
+        dlg.Controls.Add(header);
+
+        // Divider below header
+        dlg.Controls.Add(new Panel { Dock = DockStyle.Top, Height = 1, BackColor = FluentTheme.Divider });
+
+        // ── Log text area ─────────────────────────────────────────────────────
+        var rawText = LogEntries.Count == 0
+            ? "  (no log entries yet)"
+            : string.Join(Environment.NewLine, LogEntries);
+
+        var box = new RichTextBox
+        {
             Dock        = DockStyle.Fill,
             ReadOnly    = true,
             BorderStyle = BorderStyle.None,
-            BackColor   = FluentTheme.Card,
-            ForeColor   = FluentTheme.TextPrimary,
+            BackColor   = bg,
+            ForeColor   = fg,
             Font        = new Font("Cascadia Mono", 9f),
-            Text        = text,
-            Padding     = new Padding(8),
-        });
+            Text        = rawText,
+            Padding     = new Padding(10),
+            ScrollBars  = RichTextBoxScrollBars.Vertical,
+            WordWrap    = false,
+        };
+
+        dlg.Controls.Add(box);
+
+        // Colour [HH:mm:ss] timestamps in accent colour, then scroll to bottom
+        dlg.Shown += (_, _) =>
+        {
+            ColourTimestamps(box, FluentTheme.Accent);
+            box.SelectionStart = box.Text.Length;
+            box.ScrollToCaret();
+        };
+
         dlg.ShowDialog();
+        _childOpen = false;
+    }
+
+    /// <summary>Highlights [timestamp] tokens in accent colour inside a RichTextBox.</summary>
+    private static void ColourTimestamps(RichTextBox box, Color accent)
+    {
+        var full = box.Text;
+        int i = 0;
+        while (i < full.Length)
+        {
+            int open  = full.IndexOf('[', i);
+            if (open < 0) break;
+            int close = full.IndexOf(']', open);
+            if (close < 0) break;
+
+            box.Select(open, close - open + 1);
+            box.SelectionColor = accent;
+            i = close + 1;
+        }
+        // Reset selection so keyboard/scroll works normally
+        box.Select(0, 0);
+        box.SelectionColor = box.ForeColor;
     }
 
     // ── DWM chrome ────────────────────────────────────────────────────────────
@@ -262,7 +353,8 @@ public class TrayPopup : Form
         int mica   = 2; DwmSetWindowAttribute(Handle, DWMWA_SYSTEMBACKDROP_TYPE, ref mica, sizeof(int));
     }
 
-    protected override void OnDeactivate(EventArgs e) { base.OnDeactivate(e); Close(); }
+    // Only auto-close on deactivate when no child dialog is open
+    protected override void OnDeactivate(EventArgs e) { base.OnDeactivate(e); if (!_childOpen) Close(); }
 
     protected override void OnPaint(PaintEventArgs e)
     {
@@ -285,7 +377,8 @@ public class TrayPopup : Form
         var screen = Screen.FromPoint(cursor);
         int x = Math.Max(screen.WorkingArea.Left + 8,
             Math.Min(cursor.X - Width / 2, screen.WorkingArea.Right - Width - 8));
-        int y = screen.WorkingArea.Bottom - Height - 8;
+        // 20px above taskbar — Quit stays comfortably away from the click target
+        int y = screen.WorkingArea.Bottom - Height - 20;
         Location = new Point(x, y);
         Show();
         Activate();
