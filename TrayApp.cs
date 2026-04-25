@@ -5,11 +5,13 @@ public class TrayApp : ApplicationContext
     private readonly NotifyIcon _tray;
     private readonly System.Windows.Forms.Timer _pollTimer;
     private readonly System.Windows.Forms.Timer _updateTimer;
+    private readonly System.Windows.Forms.Timer _ipodTimer;
 
     private AppConfig _config;
     private LastFmClient? _client;
     private SmtcWatcher? _watcher;
     private ScrobbleEngine? _engine;
+    private IPodSyncEngine? _ipodEngine;
     private readonly List<string> _log = [];
 
     // Current track info — shown in the tray popup
@@ -20,6 +22,12 @@ public class TrayApp : ApplicationContext
 
     // Update state
     private UpdateInfo? _pendingUpdate;
+
+    // iPod state
+    private IPodDeviceInfo? _connectedIPod;
+    private int _ipodNewPlayCount;
+    private readonly HashSet<string> _seenIPodIds = [];
+    private bool _ipodSyncing;
 
     private TrayPopup? _popup;
 
@@ -52,6 +60,11 @@ public class TrayApp : ApplicationContext
         };
         _updateTimer.Start();
 
+        // Scan for connected iPods every 8 s
+        _ipodTimer = new System.Windows.Forms.Timer { Interval = 8_000 };
+        _ipodTimer.Tick += (_, _) => ScanForIPods();
+        _ipodTimer.Start();
+
         _ = InitAsync();
     }
 
@@ -81,8 +94,84 @@ public class TrayApp : ApplicationContext
             SessionKey = _config.SessionKey
         };
         _engine = new ScrobbleEngine(_client, Log);
+        _ipodEngine = new IPodSyncEngine(_client, Log);
         _pollTimer.Start();
         Log("Scrobbler started.");
+    }
+
+    // ── iPod detection ────────────────────────────────────────────────────────
+
+    private void ScanForIPods()
+    {
+        if (!_config.IPodSyncEnabled || _ipodSyncing || _client is null) return;
+
+        try
+        {
+            var devices  = IPodDetector.FindConnectedIPods();
+            var current  = devices.FirstOrDefault();
+
+            // Disconnect detection
+            if (current is null)
+            {
+                if (_connectedIPod is not null)
+                {
+                    Log($"iPod disconnected: {_connectedIPod.Name}");
+                    _connectedIPod = null;
+                    _ipodNewPlayCount = 0;
+                }
+                return;
+            }
+
+            // Same device still connected — refresh the play count silently
+            if (_connectedIPod?.Id == current.Id)
+            {
+                _ipodNewPlayCount = IPodSyncEngine.CountNewPlays(current, _config);
+                return;
+            }
+
+            // New connection
+            _connectedIPod    = current;
+            _ipodNewPlayCount = IPodSyncEngine.CountNewPlays(current, _config);
+            Log($"iPod connected: {current.Name} ({_ipodNewPlayCount} new plays)");
+
+            // First-time-this-session notification
+            if (_seenIPodIds.Add(current.Id))
+            {
+                if (_ipodNewPlayCount > 0)
+                {
+                    _tray.BalloonTipTitle = "iPod connected";
+                    _tray.BalloonTipText  = $"{current.Name} has {_ipodNewPlayCount} new play{(_ipodNewPlayCount == 1 ? "" : "s")} — click the tray icon to scrobble.";
+                    _tray.BalloonTipIcon  = ToolTipIcon.Info;
+                    _tray.ShowBalloonTip(6000);
+                }
+
+                if (_config.IPodAutoSyncOnConnect && _ipodNewPlayCount > 0)
+                    _ = SyncIPodAsync();
+            }
+        }
+        catch (Exception ex) { Log($"iPod scan error: {ex.Message}"); }
+    }
+
+    private async Task SyncIPodAsync()
+    {
+        if (_ipodEngine is null || _connectedIPod is null || _ipodSyncing) return;
+
+        _ipodSyncing = true;
+        try
+        {
+            var summary = await _ipodEngine.SyncAsync(_connectedIPod, _config);
+            _ipodNewPlayCount = 0;
+
+            if (summary.Scrobbled > 0)
+            {
+                _tray.BalloonTipTitle = "iPod sync complete";
+                _tray.BalloonTipText  = $"Scrobbled {summary.Scrobbled} play{(summary.Scrobbled == 1 ? "" : "s")} from {_connectedIPod.Name}.";
+                _tray.BalloonTipIcon  = ToolTipIcon.Info;
+                _tray.ShowBalloonTip(5000);
+            }
+        }
+        catch (Exception ex) { Log($"iPod sync failed: {ex.Message}"); }
+        finally { _ipodSyncing = false; }
     }
 
     private async Task PollAsync()
@@ -171,14 +260,16 @@ public class TrayApp : ApplicationContext
 
         _popup = TrayPopup.Create(
             _config.Username, _nowPlayingTrack, _nowPlayingArtist,
-            _currentTrackLoved, _pendingUpdate);
+            _currentTrackLoved, _pendingUpdate,
+            _connectedIPod, _ipodNewPlayCount);
 
-        _popup.LogEntries        = _log;
-        _popup.SettingsRequested += (_, _) => ShowSettings();
-        _popup.QuitRequested     += (_, _) => ExitApp();
-        _popup.LoveToggled       += (_, _) => ToggleLove();
-        _popup.UpdateRequested   += (_, _) => InstallUpdate();
-        _popup.FormClosed        += (_, _) => _popup = null;
+        _popup.LogEntries         = _log;
+        _popup.SettingsRequested  += (_, _) => ShowSettings();
+        _popup.QuitRequested      += (_, _) => ExitApp();
+        _popup.LoveToggled        += (_, _) => ToggleLove();
+        _popup.UpdateRequested    += (_, _) => InstallUpdate();
+        _popup.SyncIPodRequested  += (_, _) => _ = SyncIPodAsync();
+        _popup.FormClosed         += (_, _) => _popup = null;
         _popup.ShowNearCursor();
     }
 
@@ -244,6 +335,7 @@ public class TrayApp : ApplicationContext
     {
         _pollTimer.Stop();
         _updateTimer.Stop();
+        _ipodTimer.Stop();
         _tray.Visible = false;
         _client?.Dispose();
         Application.Exit();
@@ -272,7 +364,7 @@ public class TrayApp : ApplicationContext
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing) { _tray.Dispose(); _pollTimer.Dispose(); _updateTimer.Dispose(); _client?.Dispose(); }
+        if (disposing) { _tray.Dispose(); _pollTimer.Dispose(); _updateTimer.Dispose(); _ipodTimer.Dispose(); _client?.Dispose(); }
         base.Dispose(disposing);
     }
 }

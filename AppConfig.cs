@@ -13,6 +13,19 @@ public class AppConfig
     public int PollIntervalSeconds { get; set; } = 3;
     public bool RunAtStartup { get; set; } = true;
 
+    // ── iPod sync ─────────────────────────────────────────────────────────────
+    public bool IPodSyncEnabled { get; set; } = true;
+    public bool IPodAutoSyncOnConnect { get; set; } = false;
+
+    /// <summary>Per-device watermark (mount path → last-synced timestamp UTC).</summary>
+    public Dictionary<string, DateTime> IPodLastSync { get; set; } = new();
+
+    public DateTime GetLastIPodSync(string deviceId) =>
+        IPodLastSync.TryGetValue(deviceId, out var t) ? t : DateTime.MinValue;
+
+    public void SetLastIPodSync(string deviceId, DateTime utc) =>
+        IPodLastSync[deviceId] = utc;
+
     private const string StartupKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
     private const string StartupName = "WinScrobb";
 

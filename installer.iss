@@ -1,5 +1,5 @@
 #define MyAppName      "WinScrobb"
-#define MyAppVersion   "1.0.1"
+#define MyAppVersion   "1.0.2"
 #define MyAppPublisher "WinScrobb"
 #define MyAppExeName   "WinScrobb.exe"
 #define PublishDir     "publish"

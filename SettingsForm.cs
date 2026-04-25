@@ -11,6 +11,9 @@ public class SettingsForm : Form
     private readonly FluentButton _cancelBtn = new() { Text = "Cancel" };
     private readonly Label        _statusLbl = new();
     private readonly CheckBox     _startupCb = new();
+    private readonly CheckBox     _ipodEnableCb   = new();
+    private readonly CheckBox     _ipodAutoSyncCb = new();
+    private readonly Label        _ipodStatusLbl  = new();
 
     public AppConfig Config { get; }
 
@@ -88,6 +91,16 @@ public class SettingsForm : Form
         _startupCb.Location  = new Point(Pad, y);
         Controls.Add(_startupCb);
         y += 34;
+
+        // ── iPod section ──────────────────────────────────────────────────────
+        Controls.Add(new Panel { BackColor = FluentTheme.Divider, Left = 0, Top = y, Width = W, Height = 1 });
+        y += 17;
+
+        Controls.Add(SectionLabel("iPod sync (Classic / Nano)", Pad, y));
+        y += 26;
+
+        y = AddIPodCard(y);
+        y += 16;
 
         // ── Buttons ───────────────────────────────────────────────────────────
         _cancelBtn.Size     = new Size(110, 34);
@@ -204,6 +217,68 @@ public class SettingsForm : Form
         return startY + cardH;
     }
 
+    // ── iPod card ─────────────────────────────────────────────────────────────
+
+    private int AddIPodCard(int startY)
+    {
+        const int cardH = 132;
+        var card = new FluentCard
+        {
+            Location  = new Point(Pad, startY),
+            Size      = new Size(CardW, cardH),
+            BackColor = FluentTheme.Card,
+        };
+
+        // Status line — shows currently connected iPod, if any
+        var connected = IPodDetector.FindConnectedIPods();
+        _ipodStatusLbl.Text      = connected.Count == 0
+            ? "No iPod connected — connect one and re-open settings."
+            : $"Connected: {connected[0].Name} at {connected[0].MountPath}"
+              + (connected[0].IsCompressed ? "  (iTunesCDB — not yet supported)" : "");
+        _ipodStatusLbl.Font      = FluentTheme.Caption(8.5f);
+        _ipodStatusLbl.ForeColor = connected.Count == 0
+            ? FluentTheme.TextMuted
+            : (connected[0].IsCompressed ? Color.FromArgb(232, 120, 64) : FluentTheme.Accent);
+        _ipodStatusLbl.AutoSize  = true;
+        _ipodStatusLbl.Location  = new Point(16, 14);
+        _ipodStatusLbl.BackColor = FluentTheme.Card;
+        card.Controls.Add(_ipodStatusLbl);
+
+        // Enable iPod sync
+        _ipodEnableCb.Text      = "Enable iPod sync";
+        _ipodEnableCb.Font      = FluentTheme.Body(9.5f);
+        _ipodEnableCb.ForeColor = FluentTheme.TextPrimary;
+        _ipodEnableCb.BackColor = FluentTheme.Card;
+        _ipodEnableCb.Checked   = Config.IPodSyncEnabled;
+        _ipodEnableCb.AutoSize  = true;
+        _ipodEnableCb.Location  = new Point(16, 44);
+        card.Controls.Add(_ipodEnableCb);
+
+        // Auto-sync on connect
+        _ipodAutoSyncCb.Text      = "Automatically sync when iPod is connected";
+        _ipodAutoSyncCb.Font      = FluentTheme.Body(9.5f);
+        _ipodAutoSyncCb.ForeColor = FluentTheme.TextPrimary;
+        _ipodAutoSyncCb.BackColor = FluentTheme.Card;
+        _ipodAutoSyncCb.Checked   = Config.IPodAutoSyncOnConnect;
+        _ipodAutoSyncCb.AutoSize  = true;
+        _ipodAutoSyncCb.Location  = new Point(16, 72);
+        card.Controls.Add(_ipodAutoSyncCb);
+
+        // Footnote
+        card.Controls.Add(new Label
+        {
+            Text      = "Reads new plays from iPod_Control/iTunes/Play Counts",
+            Font      = FluentTheme.Caption(8f),
+            ForeColor = FluentTheme.TextMuted,
+            AutoSize  = true,
+            Location  = new Point(16, 102),
+            BackColor = FluentTheme.Card,
+        });
+
+        Controls.Add(card);
+        return startY + cardH;
+    }
+
     // ── Small helpers ─────────────────────────────────────────────────────────
 
     private static Label SectionLabel(string text, int x, int y) => new()
@@ -279,9 +354,11 @@ public class SettingsForm : Form
 
             Status("Completing sign-in…");
             var (sessionKey, username) = await client.GetSessionAsync(token);
-            Config.SessionKey  = sessionKey;
-            Config.Username    = username;
-            Config.RunAtStartup = _startupCb.Checked;
+            Config.SessionKey            = sessionKey;
+            Config.Username              = username;
+            Config.RunAtStartup          = _startupCb.Checked;
+            Config.IPodSyncEnabled       = _ipodEnableCb.Checked;
+            Config.IPodAutoSyncOnConnect = _ipodAutoSyncCb.Checked;
             Config.Save();
             Config.ApplyStartup();
             DialogResult = DialogResult.OK;

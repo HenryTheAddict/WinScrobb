@@ -16,6 +16,7 @@ public class TrayPopup : Form
     public event EventHandler? QuitRequested;
     public event EventHandler? LoveToggled;
     public event EventHandler? UpdateRequested;
+    public event EventHandler? SyncIPodRequested;
 
     [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     public IReadOnlyList<string> LogEntries { get; set; } = [];
@@ -33,7 +34,8 @@ public class TrayPopup : Form
     private static readonly string GlyphQuit     = ""; // PowerButton
 
     public TrayPopup(string username, string? nowPlaying, string? nowPlayingArtist,
-                     bool isLoved = false, UpdateInfo? update = null)
+                     bool isLoved = false, UpdateInfo? update = null,
+                     IPodDeviceInfo? iPod = null, int iPodNewPlays = 0)
     {
         FormBorderStyle = FormBorderStyle.None;
         ShowInTaskbar   = false;
@@ -43,19 +45,21 @@ public class TrayPopup : Form
         ForeColor       = FluentTheme.TextPrimary;
         Font            = FluentTheme.Body();
 
-        Build(username, nowPlaying, nowPlayingArtist, isLoved, update);
+        Build(username, nowPlaying, nowPlayingArtist, isLoved, update, iPod, iPodNewPlays);
     }
 
     // ── Build ─────────────────────────────────────────────────────────────────
 
     private void Build(string username, string? nowPlaying, string? nowPlayingArtist,
-                       bool isLoved, UpdateInfo? update)
+                       bool isLoved, UpdateInfo? update,
+                       IPodDeviceInfo? iPod, int iPodNewPlays)
     {
         SuspendLayout();
         int y = 0;
 
         y = AddHeader(y, username);
         if (update is not null) y = AddUpdateBanner(y, update);
+        if (iPod is not null)   y = AddIPodBanner(y, iPod, iPodNewPlays);
         y = AddNowPlaying(y, nowPlaying, nowPlayingArtist, isLoved);
 
         AddDivider(ref y);
@@ -149,6 +153,72 @@ public class TrayPopup : Form
         panel.Controls.Add(btn);
         panel.Layout += (_, _) =>
             btn.Location = new Point(W - btn.Width - 10, (h - btn.Height) / 2);
+
+        Controls.Add(panel);
+        return y + h;
+    }
+
+    // ── iPod banner ───────────────────────────────────────────────────────────
+
+    private int AddIPodBanner(int y, IPodDeviceInfo iPod, int newPlays)
+    {
+        const int h    = 44;
+        var      isDk  = FluentTheme.IsDarkMode();
+        var      bg    = isDk ? Color.FromArgb(38, 42, 50) : Color.FromArgb(232, 236, 244);
+        var      fg    = FluentTheme.TextPrimary;
+
+        var panel = new Panel { BackColor = bg, Location = new Point(0, y), Size = new Size(W, h) };
+
+        // iPod glyph (Segoe MDL2 EC0E "Devices2")
+        panel.Controls.Add(new Label
+        {
+            Text      = "",
+            Font      = new Font("Segoe MDL2 Assets", 12f),
+            ForeColor = FluentTheme.Accent,
+            AutoSize  = true,
+            Location  = new Point(14, 13),
+            BackColor = Color.Transparent,
+        });
+
+        panel.Controls.Add(new Label
+        {
+            Text      = Truncate(iPod.Name, 26),
+            Font      = FluentTheme.Body(9f),
+            ForeColor = fg,
+            AutoSize  = true,
+            Location  = new Point(40, 6),
+            BackColor = Color.Transparent,
+        });
+
+        var subText = iPod.IsCompressed
+            ? "iTunesCDB — not yet supported"
+            : (newPlays == 0 ? "no new plays" : $"{newPlays} new play{(newPlays == 1 ? "" : "s")}");
+        panel.Controls.Add(new Label
+        {
+            Text      = subText,
+            Font      = FluentTheme.Caption(8f),
+            ForeColor = FluentTheme.TextMuted,
+            AutoSize  = true,
+            Location  = new Point(40, 24),
+            BackColor = Color.Transparent,
+        });
+
+        if (!iPod.IsCompressed && newPlays > 0)
+        {
+            var btn = new Label
+            {
+                Text      = "Sync →",
+                Font      = new Font(FluentTheme.Body(8.5f), FontStyle.Underline),
+                ForeColor = FluentTheme.Accent,
+                AutoSize  = true,
+                Cursor    = Cursors.Hand,
+                BackColor = Color.Transparent,
+            };
+            btn.Click += (_, _) => { Close(); SyncIPodRequested?.Invoke(this, EventArgs.Empty); };
+            panel.Controls.Add(btn);
+            panel.Layout += (_, _) =>
+                btn.Location = new Point(W - btn.Width - 12, (h - btn.Height) / 2);
+        }
 
         Controls.Add(panel);
         return y + h;
@@ -412,8 +482,9 @@ public class TrayPopup : Form
     // ── Positioning ───────────────────────────────────────────────────────────
 
     public static TrayPopup Create(string username, string? nowPlaying, string? nowPlayingArtist,
-                                   bool isLoved = false, UpdateInfo? update = null)
-        => new(username, nowPlaying, nowPlayingArtist, isLoved, update);
+                                   bool isLoved = false, UpdateInfo? update = null,
+                                   IPodDeviceInfo? iPod = null, int iPodNewPlays = 0)
+        => new(username, nowPlaying, nowPlayingArtist, isLoved, update, iPod, iPodNewPlays);
 
     public void ShowNearCursor()
     {
