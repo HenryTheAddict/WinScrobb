@@ -4,7 +4,7 @@
 
 # WinScrobb
 
-A Last.fm scrobbler for Windows. Sits in your system tray and scrobbles music from any app — Spotify, Apple Music, iTunes, browsers, and more.
+*THE* Last Last.fm scrobbler for Windows. Sits in your system tray and scrobbles music from any app — Spotify, Cider, Apple Music, iTunes, browsers*(maybe)*, and more.
 
 ![Windows 11](https://img.shields.io/badge/Windows%2011-0078D4?style=flat&logo=windows11&logoColor=white)
 ![.NET 10](https://img.shields.io/badge/.NET%2010-512BD4?style=flat&logo=dotnet&logoColor=white)
@@ -36,3 +36,7 @@ Requires [.NET 10 SDK](https://dot.net).
 ```
 dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o publish
 ```
+
+## Asterisk
+Maybe it will work on some browsers but if your using a neiche browser make a PR to add your stupid neiche browser, 
+we have helium support and all major browsers.
