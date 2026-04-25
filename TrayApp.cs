@@ -4,6 +4,7 @@ public class TrayApp : ApplicationContext
 {
     private readonly NotifyIcon _tray;
     private readonly System.Windows.Forms.Timer _pollTimer;
+    private readonly System.Windows.Forms.Timer _updateTimer;
 
     private AppConfig _config;
     private LastFmClient? _client;
@@ -16,6 +17,9 @@ public class TrayApp : ApplicationContext
     private string? _nowPlayingArtist;
     private bool    _currentTrackLoved;
     private readonly HashSet<string> _lovedKeys = [];
+
+    // Update state
+    private UpdateInfo? _pendingUpdate;
 
     private TrayPopup? _popup;
 
@@ -38,6 +42,15 @@ public class TrayApp : ApplicationContext
             Interval = _config.PollIntervalSeconds * 1000
         };
         _pollTimer.Tick += async (_, _) => await PollAsync();
+
+        // Check for updates every 4 hours; first check after 20 s
+        _updateTimer = new System.Windows.Forms.Timer { Interval = 20_000 };
+        _updateTimer.Tick += async (_, _) =>
+        {
+            _updateTimer.Interval = 4 * 60 * 60 * 1000; // switch to 4-hour cadence
+            await CheckForUpdateAsync();
+        };
+        _updateTimer.Start();
 
         _ = InitAsync();
     }
@@ -98,6 +111,53 @@ public class TrayApp : ApplicationContext
         catch (Exception ex) { Log($"Poll error: {ex.Message}"); }
     }
 
+    // ── Auto-update ───────────────────────────────────────────────────────────
+
+    private async Task CheckForUpdateAsync()
+    {
+        try
+        {
+            var info = await UpdateChecker.CheckAsync();
+            if (info is null) return;
+
+            _pendingUpdate = info;
+            Log($"Update available: {info.TagName}");
+
+            _tray.BalloonTipTitle = "WinScrobb update available";
+            _tray.BalloonTipText  = $"Version {info.TagName} is ready to install. Click the tray icon to update.";
+            _tray.BalloonTipIcon  = ToolTipIcon.Info;
+            _tray.ShowBalloonTip(8000);
+        }
+        catch { /* non-fatal */ }
+    }
+
+    private async void InstallUpdate()
+    {
+        if (_pendingUpdate is null) return;
+
+        _pollTimer.Stop();
+        _updateTimer.Stop();
+
+        using var dlg  = new UpdateProgressForm(_pendingUpdate);
+        var progress   = new Progress<int>(pct => dlg.SetProgress(pct));
+
+        dlg.Show();
+
+        try
+        {
+            await UpdateChecker.DownloadAndInstallAsync(_pendingUpdate, progress);
+            // Application.Exit() is called inside DownloadAndInstallAsync — we don't reach here.
+        }
+        catch (Exception ex)
+        {
+            dlg.Close();
+            MessageBox.Show($"Update failed: {ex.Message}", "WinScrobb",
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
+            _pollTimer.Start();
+            _updateTimer.Start();
+        }
+    }
+
     // ── Tray icon click → flyout ──────────────────────────────────────────────
 
     private void OnTrayClick(object? sender, MouseEventArgs e)
@@ -109,11 +169,15 @@ public class TrayApp : ApplicationContext
             return;
         }
 
-        _popup = TrayPopup.Create(_config.Username, _nowPlayingTrack, _nowPlayingArtist, _currentTrackLoved);
-        _popup.LogEntries = _log;
+        _popup = TrayPopup.Create(
+            _config.Username, _nowPlayingTrack, _nowPlayingArtist,
+            _currentTrackLoved, _pendingUpdate);
+
+        _popup.LogEntries        = _log;
         _popup.SettingsRequested += (_, _) => ShowSettings();
         _popup.QuitRequested     += (_, _) => ExitApp();
         _popup.LoveToggled       += (_, _) => ToggleLove();
+        _popup.UpdateRequested   += (_, _) => InstallUpdate();
         _popup.FormClosed        += (_, _) => _popup = null;
         _popup.ShowNearCursor();
     }
@@ -179,6 +243,7 @@ public class TrayApp : ApplicationContext
     private void ExitApp()
     {
         _pollTimer.Stop();
+        _updateTimer.Stop();
         _tray.Visible = false;
         _client?.Dispose();
         Application.Exit();
@@ -207,7 +272,7 @@ public class TrayApp : ApplicationContext
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing) { _tray.Dispose(); _pollTimer.Dispose(); _client?.Dispose(); }
+        if (disposing) { _tray.Dispose(); _pollTimer.Dispose(); _updateTimer.Dispose(); _client?.Dispose(); }
         base.Dispose(disposing);
     }
 }

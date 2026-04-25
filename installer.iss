@@ -25,6 +25,7 @@ ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0.19041
 UninstallDisplayIcon={app}\{#MyAppExeName}
 CloseApplications=yes
+RestartApplications=yes
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"

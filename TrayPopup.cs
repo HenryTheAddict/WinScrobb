@@ -15,6 +15,7 @@ public class TrayPopup : Form
     public event EventHandler? SettingsRequested;
     public event EventHandler? QuitRequested;
     public event EventHandler? LoveToggled;
+    public event EventHandler? UpdateRequested;
 
     [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     public IReadOnlyList<string> LogEntries { get; set; } = [];
@@ -31,7 +32,8 @@ public class TrayPopup : Form
     private static readonly string GlyphLog      = ""; // ViewAll
     private static readonly string GlyphQuit     = ""; // PowerButton
 
-    public TrayPopup(string username, string? nowPlaying, string? nowPlayingArtist, bool isLoved = false)
+    public TrayPopup(string username, string? nowPlaying, string? nowPlayingArtist,
+                     bool isLoved = false, UpdateInfo? update = null)
     {
         FormBorderStyle = FormBorderStyle.None;
         ShowInTaskbar   = false;
@@ -41,17 +43,19 @@ public class TrayPopup : Form
         ForeColor       = FluentTheme.TextPrimary;
         Font            = FluentTheme.Body();
 
-        Build(username, nowPlaying, nowPlayingArtist, isLoved);
+        Build(username, nowPlaying, nowPlayingArtist, isLoved, update);
     }
 
     // ── Build ─────────────────────────────────────────────────────────────────
 
-    private void Build(string username, string? nowPlaying, string? nowPlayingArtist, bool isLoved)
+    private void Build(string username, string? nowPlaying, string? nowPlayingArtist,
+                       bool isLoved, UpdateInfo? update)
     {
         SuspendLayout();
         int y = 0;
 
         y = AddHeader(y, username);
+        if (update is not null) y = AddUpdateBanner(y, update);
         y = AddNowPlaying(y, nowPlaying, nowPlayingArtist, isLoved);
 
         AddDivider(ref y);
@@ -106,6 +110,45 @@ public class TrayPopup : Form
             Location  = new Point(55, 38),
             BackColor = Color.Transparent,
         });
+
+        Controls.Add(panel);
+        return y + h;
+    }
+
+    // ── Update banner ─────────────────────────────────────────────────────────
+
+    private int AddUpdateBanner(int y, UpdateInfo update)
+    {
+        const int h = 36;
+        var accent  = FluentTheme.Accent;
+        var bg      = Color.FromArgb(FluentTheme.IsDarkMode() ? 30 : 220,
+                                     accent.R, accent.G, accent.B);
+
+        var panel = new Panel { BackColor = bg, Location = new Point(0, y), Size = new Size(W, h) };
+
+        panel.Controls.Add(new Label
+        {
+            Text      = $"  ↑  {update.TagName} available",
+            Font      = FluentTheme.Body(9f),
+            ForeColor = Color.White,
+            AutoSize  = true,
+            Location  = new Point(6, 9),
+            BackColor = Color.Transparent,
+        });
+
+        var btn = new Label
+        {
+            Text      = "Install now →",
+            Font      = new Font(FluentTheme.Body(8.5f), FontStyle.Underline),
+            ForeColor = Color.White,
+            AutoSize  = true,
+            Cursor    = Cursors.Hand,
+            BackColor = Color.Transparent,
+        };
+        btn.Click += (_, _) => { Close(); UpdateRequested?.Invoke(this, EventArgs.Empty); };
+        panel.Controls.Add(btn);
+        panel.Layout += (_, _) =>
+            btn.Location = new Point(W - btn.Width - 10, (h - btn.Height) / 2);
 
         Controls.Add(panel);
         return y + h;
@@ -368,8 +411,9 @@ public class TrayPopup : Form
 
     // ── Positioning ───────────────────────────────────────────────────────────
 
-    public static TrayPopup Create(string username, string? nowPlaying, string? nowPlayingArtist, bool isLoved = false)
-        => new(username, nowPlaying, nowPlayingArtist, isLoved);
+    public static TrayPopup Create(string username, string? nowPlaying, string? nowPlayingArtist,
+                                   bool isLoved = false, UpdateInfo? update = null)
+        => new(username, nowPlaying, nowPlayingArtist, isLoved, update);
 
     public void ShowNearCursor()
     {
