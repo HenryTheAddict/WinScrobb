@@ -20,14 +20,9 @@ public class IPodSyncEngine
 
     public async Task<SyncSummary> SyncAsync(IPodDeviceInfo device, AppConfig config)
     {
-        if (device.IsCompressed)
-        {
-            _log($"iPod {device.Name}: iTunesCDB (compressed) format not yet supported.");
-            return new SyncSummary(0, 0, 0, 0, 0);
-        }
-
         // Diagnostic dump — helpful when an iPod connects but no plays show up
         _log($"iPod {device.Name}: reading library at {device.MountPath}…");
+        if (device.IsCompressed) _log("  iTunesCDB detected — attempting QuickLZ decompression.");
         _log($"  iTunesDB: {(File.Exists(device.ITunesDbPath) ? new FileInfo(device.ITunesDbPath).Length + " bytes" : "missing")}");
         _log($"  Play Counts: {(device.PlayCountsPath is null ? "missing" : new FileInfo(device.PlayCountsPath).Length + " bytes")}");
         _log($"  iTunesStats: {(device.ITunesStatsPath is null ? "missing" : new FileInfo(device.ITunesStatsPath).Length + " bytes")}");

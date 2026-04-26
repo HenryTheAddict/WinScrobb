@@ -154,15 +154,31 @@ public class TrayApp : ApplicationContext
         catch (Exception ex) { Log($"iPod scan error: {ex.Message}"); }
     }
 
-    private async Task SyncIPodAsync()
+    private void OpenIPodForm()
+    {
+        if (_connectedIPod is null) return;
+
+        var form = new IPodForm(_connectedIPod, _config, _log);
+        form.SyncRequested += async (_, _) =>
+        {
+            form.SetSyncing(true);
+            await SyncIPodAsync(form);
+            form.SetSyncing(false, _ipodNewPlayCount);
+        };
+        form.Show();
+    }
+
+    private async Task SyncIPodAsync(IPodForm? form = null)
     {
         if (_ipodEngine is null || _connectedIPod is null || _ipodSyncing) return;
 
         _ipodSyncing = true;
         try
         {
+            form?.SetStatus("Reading iPod database…");
             var summary = await _ipodEngine.SyncAsync(_connectedIPod, _config);
             _ipodNewPlayCount = 0;
+            form?.SetStatus($"Done — {summary.Scrobbled} scrobbled, {summary.Skipped} skipped, {summary.Failed} failed");
 
             if (summary.Scrobbled > 0)
             {
@@ -172,7 +188,7 @@ public class TrayApp : ApplicationContext
                 _tray.ShowBalloonTip(5000);
             }
         }
-        catch (Exception ex) { Log($"iPod sync failed: {ex.Message}"); }
+        catch (Exception ex) { Log($"iPod sync failed: {ex.Message}"); form?.SetStatus($"Failed: {ex.Message}"); }
         finally { _ipodSyncing = false; }
     }
 
@@ -292,7 +308,7 @@ public class TrayApp : ApplicationContext
         _popup.QuitRequested       += (_, _) => ExitApp();
         _popup.LoveToggled         += (_, _) => ToggleLove();
         _popup.UpdateRequested     += (_, _) => InstallUpdate();
-        _popup.SyncIPodRequested   += (_, _) => _ = SyncIPodAsync();
+        _popup.SyncIPodRequested   += (_, _) => OpenIPodForm();
         _popup.GhostToggleRequested+= (_, _) => ToggleGhostMode();
         _popup.LogoTapped          += (_, _) => OnLogoTap();
         _popup.FormClosed          += (_, _) => _popup = null;

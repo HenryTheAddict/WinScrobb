@@ -207,9 +207,9 @@ public class TrayPopup : Form
             BackColor = Color.Transparent,
         });
 
-        var subText = iPod.IsCompressed
-            ? "iTunesCDB — not yet supported"
-            : (newPlays == 0 ? "no new plays" : $"{newPlays} new play{(newPlays == 1 ? "" : "s")}");
+        var subText = newPlays == 0
+            ? (iPod.IsCompressed ? "compressed library — open menu to sync" : "no new plays")
+            : $"{newPlays} new play{(newPlays == 1 ? "" : "s")}";
         panel.Controls.Add(new Label
         {
             Text      = subText,
@@ -220,11 +220,11 @@ public class TrayPopup : Form
             BackColor = Color.Transparent,
         });
 
-        if (!iPod.IsCompressed && newPlays > 0)
+        // Always offer the action — opening the iPod menu, which may sync or show details
         {
             var btn = new Label
             {
-                Text      = "Sync →",
+                Text      = newPlays > 0 ? "Sync →" : "Open →",
                 Font      = new Font(FluentTheme.Body(8.5f), FontStyle.Underline),
                 ForeColor = FluentTheme.Accent,
                 AutoSize  = true,
@@ -235,6 +235,10 @@ public class TrayPopup : Form
             panel.Controls.Add(btn);
             panel.Layout += (_, _) =>
                 btn.Location = new Point(W - btn.Width - 12, (h - btn.Height) / 2);
+
+            // Make the whole banel clickable to open the dedicated menu
+            panel.Cursor = Cursors.Hand;
+            panel.Click += (_, _) => { Close(); SyncIPodRequested?.Invoke(this, EventArgs.Empty); };
         }
 
         Controls.Add(panel);

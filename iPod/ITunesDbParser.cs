@@ -24,6 +24,14 @@ public static class ITunesDbParser
     public static List<IPodTrack> Parse(string path)
     {
         var data = File.ReadAllBytes(path);
+
+        // iTunesCDB: 9-byte QuickLZ header + compressed iTunesDB. Decompress in place.
+        if (path.EndsWith("iTunesCDB", StringComparison.OrdinalIgnoreCase) ||
+            QuickLZ.LooksCompressed(data))
+        {
+            data = QuickLZ.Decompress(data);
+        }
+
         var tracks = new List<IPodTrack>();
 
         if (!Match(data, 0, "mhbd")) return tracks;
