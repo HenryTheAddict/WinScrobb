@@ -94,10 +94,15 @@ public static class FluentTheme
 
     public static string? FindAsset(string filename)
     {
+        // Search in this order: assets/ next to exe → exe folder → repo root (debug) →
+        // assets/ in repo root (debug). Returns first hit.
+        var baseDir = AppContext.BaseDirectory;
         foreach (var candidate in new[]
         {
-            Path.Combine(AppContext.BaseDirectory, filename),
-            Path.Combine(AppContext.BaseDirectory, "..", "..", "..", filename),
+            Path.Combine(baseDir, "assets", filename),
+            Path.Combine(baseDir, filename),
+            Path.Combine(baseDir, "..", "..", "..", "assets", filename),
+            Path.Combine(baseDir, "..", "..", "..", filename),
         })
             if (File.Exists(candidate)) return candidate;
         return null;

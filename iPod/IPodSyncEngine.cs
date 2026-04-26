@@ -26,7 +26,11 @@ public class IPodSyncEngine
             return new SyncSummary(0, 0, 0, 0, 0);
         }
 
+        // Diagnostic dump — helpful when an iPod connects but no plays show up
         _log($"iPod {device.Name}: reading library at {device.MountPath}…");
+        _log($"  iTunesDB: {(File.Exists(device.ITunesDbPath) ? new FileInfo(device.ITunesDbPath).Length + " bytes" : "missing")}");
+        _log($"  Play Counts: {(device.PlayCountsPath is null ? "missing" : new FileInfo(device.PlayCountsPath).Length + " bytes")}");
+        _log($"  iTunesStats: {(device.ITunesStatsPath is null ? "missing" : new FileInfo(device.ITunesStatsPath).Length + " bytes")}");
 
         List<IPodTrack> tracks;
         try { tracks = ITunesDbParser.Parse(device.ITunesDbPath); }
@@ -42,6 +46,32 @@ public class IPodSyncEngine
         var newPlays = device.PlayCountsPath is null
             ? []
             : PlayCountsParser.Parse(device.PlayCountsPath);
+        if (newPlays.Count > 0)
+            _log($"  Parsed {newPlays.Count} plays from Play Counts.");
+
+        // Fallback for Nano 3G+ where Play Counts is absent and iTunesStats is used.
+        // iTunesStats doesn't carry a precise per-play timestamp, so we synthesize
+        // a "now" timestamp shifted by a small offset — Last.fm dedupes this fine.
+        if (newPlays.Count == 0 && device.ITunesStatsPath is not null)
+        {
+            try
+            {
+                var stats = ITunesStatsParser.Parse(device.ITunesStatsPath);
+                _log($"  Parsed {stats.Count} plays from iTunesStats fallback.");
+
+                var nowUtc = DateTime.UtcNow;
+                int idx = 0;
+                foreach (var s in stats)
+                {
+                    // Spread synthesized timestamps a few minutes apart so Last.fm
+                    // shows them as distinct plays
+                    var fakeTs = nowUtc.AddMinutes(-(stats.Count - idx) * 4);
+                    newPlays.Add(new PlayCountsParser.Entry(s.TrackIndex, fakeTs, s.PlayCountDelta, s.SkipCountDelta));
+                    idx++;
+                }
+            }
+            catch (Exception ex) { _log($"  ⚠ iTunesStats parse failed: {ex.Message}"); }
+        }
 
         // De-dupe against our own last-sync watermark (per-device)
         var sinceUtc = config.GetLastIPodSync(device.Id);

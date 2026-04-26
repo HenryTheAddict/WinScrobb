@@ -1,5 +1,5 @@
 #define MyAppName      "WinScrobb"
-#define MyAppVersion   "1.0.2"
+#define MyAppVersion   "1.1.0"
 #define MyAppPublisher "WinScrobb"
 #define MyAppExeName   "WinScrobb.exe"
 #define PublishDir     "publish"
@@ -15,7 +15,7 @@ DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=installer
 OutputBaseFilename=WinScrobb-Setup
-SetupIconFile=icon.ico
+SetupIconFile=assets\icon.ico
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
@@ -34,14 +34,12 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Additional icons:"
 
 [Files]
-Source: "{#PublishDir}\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
-Source: "{#PublishDir}\logo.png";        DestDir: "{app}"; Flags: ignoreversion
-Source: "{#PublishDir}\logosmall.png";   DestDir: "{app}"; Flags: ignoreversion
-Source: "icon.ico";                      DestDir: "{app}"; Flags: ignoreversion
+Source: "{#PublishDir}\{#MyAppExeName}";    DestDir: "{app}";        Flags: ignoreversion
+Source: "{#PublishDir}\assets\*";           DestDir: "{app}\assets"; Flags: ignoreversion recursesubdirs
 
 [Icons]
-Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\icon.ico"
-Name: "{autodesktop}\{#MyAppName}";  Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\icon.ico"; Tasks: desktopicon
+Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\assets\icon.ico"
+Name: "{autodesktop}\{#MyAppName}";  Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\assets\icon.ico"; Tasks: desktopicon
 
 [Registry]
 ; Run at startup — matches what the app writes so they stay in sync

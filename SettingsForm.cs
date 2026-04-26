@@ -14,12 +14,17 @@ public class SettingsForm : Form
     private readonly CheckBox     _ipodEnableCb   = new();
     private readonly CheckBox     _ipodAutoSyncCb = new();
     private readonly Label        _ipodStatusLbl  = new();
+    private CheckBox?             _retroIconCb;
 
     public AppConfig Config { get; }
+    private readonly string _origApiKey;
+    private readonly string _origApiSecret;
 
     public SettingsForm(AppConfig existing)
     {
-        Config = existing;
+        Config         = existing;
+        _origApiKey    = existing.ApiKey ?? "";
+        _origApiSecret = existing.ApiSecret ?? "";
         Build();
     }
 
@@ -101,6 +106,29 @@ public class SettingsForm : Form
 
         y = AddIPodCard(y);
         y += 16;
+
+        // ── Retro icon (only visible when unlocked via easter egg) ────────────
+        if (Config.RetroIconUnlocked)
+        {
+            Controls.Add(new Panel { BackColor = FluentTheme.Divider, Left = 0, Top = y, Width = W, Height = 1 });
+            y += 17;
+
+            Controls.Add(SectionLabel("Personalization", Pad, y));
+            y += 26;
+
+            _retroIconCb = new CheckBox
+            {
+                Text      = "✦  Use retro tray icon  (unlocked!)",
+                Font      = FluentTheme.Body(9.5f),
+                ForeColor = FluentTheme.Accent,
+                BackColor = FluentTheme.Surface,
+                Checked   = Config.UseRetroIcon,
+                AutoSize  = true,
+                Location  = new Point(Pad, y),
+            };
+            Controls.Add(_retroIconCb);
+            y += 32;
+        }
 
         // ── Buttons ───────────────────────────────────────────────────────────
         _cancelBtn.Size     = new Size(110, 34);
@@ -327,11 +355,31 @@ public class SettingsForm : Form
             return;
         }
 
+        // ── Fast path: API creds unchanged → just save the toggles, skip Last.fm auth ──
+        var newKey    = _apiKey.Value.Trim();
+        var newSecret = _apiSecret.Value.Trim();
+        bool credsUnchanged =
+            newKey    == _origApiKey &&
+            newSecret == _origApiSecret &&
+            !string.IsNullOrEmpty(Config.SessionKey);
+
+        if (credsUnchanged)
+        {
+            Config.RunAtStartup          = _startupCb.Checked;
+            Config.IPodSyncEnabled       = _ipodEnableCb.Checked;
+            Config.IPodAutoSyncOnConnect = _ipodAutoSyncCb.Checked;
+            Config.UseRetroIcon          = _retroIconCb is { Checked: true };
+            Config.Save();
+            Config.ApplyStartup();
+            DialogResult = DialogResult.OK;
+            return;
+        }
+
         _saveBtn.Enabled = false;
         Status("Requesting auth token…");
 
-        Config.ApiKey     = _apiKey.Value.Trim();
-        Config.ApiSecret  = _apiSecret.Value.Trim();
+        Config.ApiKey     = newKey;
+        Config.ApiSecret  = newSecret;
         Config.SessionKey = "";
         Config.Username   = "";
 
@@ -359,6 +407,7 @@ public class SettingsForm : Form
             Config.RunAtStartup          = _startupCb.Checked;
             Config.IPodSyncEnabled       = _ipodEnableCb.Checked;
             Config.IPodAutoSyncOnConnect = _ipodAutoSyncCb.Checked;
+            Config.UseRetroIcon          = _retroIconCb is { Checked: true };
             Config.Save();
             Config.ApplyStartup();
             DialogResult = DialogResult.OK;

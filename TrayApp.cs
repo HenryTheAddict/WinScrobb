@@ -38,7 +38,8 @@ public class TrayApp : ApplicationContext
         _tray = new NotifyIcon
         {
             Text    = "WinScrobb",
-            Icon    = LoadTrayIcon(),
+            Icon    = LoadTrayIcon(_config.IsGhostActive,
+                                   _config.UseRetroIcon && _config.RetroIconUnlocked),
             Visible = true,
         };
 
@@ -104,6 +105,7 @@ public class TrayApp : ApplicationContext
     private void ScanForIPods()
     {
         if (!_config.IPodSyncEnabled || _ipodSyncing || _client is null) return;
+        if (_config.IsGhostActive) return; // Don't scrobble from iPod during ghost mode
 
         try
         {
@@ -177,9 +179,30 @@ public class TrayApp : ApplicationContext
     private async Task PollAsync()
     {
         if (_engine is null || _watcher is null) return;
+
+        TickGhostExpiry();
+
         try
         {
             var snapshot = await _watcher.GetSnapshotAsync();
+
+            // Ghost mode: track locally for the popup but don't talk to Last.fm
+            if (_config.IsGhostActive)
+            {
+                if (snapshot?.HasTrack == true && snapshot.IsMusic)
+                {
+                    _nowPlayingTrack  = snapshot.Title;
+                    _nowPlayingArtist = snapshot.Artist;
+                }
+                else
+                {
+                    _nowPlayingTrack  = null;
+                    _nowPlayingArtist = null;
+                }
+                UpdateTrayVisuals();
+                return;
+            }
+
             await _engine.TickAsync(snapshot);
 
             if (snapshot?.HasTrack == true && snapshot.IsMusic)
@@ -261,15 +284,18 @@ public class TrayApp : ApplicationContext
         _popup = TrayPopup.Create(
             _config.Username, _nowPlayingTrack, _nowPlayingArtist,
             _currentTrackLoved, _pendingUpdate,
-            _connectedIPod, _ipodNewPlayCount);
+            _connectedIPod, _ipodNewPlayCount,
+            _config.GhostUntilUtc, _config.RetroIconUnlocked);
 
-        _popup.LogEntries         = _log;
-        _popup.SettingsRequested  += (_, _) => ShowSettings();
-        _popup.QuitRequested      += (_, _) => ExitApp();
-        _popup.LoveToggled        += (_, _) => ToggleLove();
-        _popup.UpdateRequested    += (_, _) => InstallUpdate();
-        _popup.SyncIPodRequested  += (_, _) => _ = SyncIPodAsync();
-        _popup.FormClosed         += (_, _) => _popup = null;
+        _popup.LogEntries          = _log;
+        _popup.SettingsRequested   += (_, _) => ShowSettings();
+        _popup.QuitRequested       += (_, _) => ExitApp();
+        _popup.LoveToggled         += (_, _) => ToggleLove();
+        _popup.UpdateRequested     += (_, _) => InstallUpdate();
+        _popup.SyncIPodRequested   += (_, _) => _ = SyncIPodAsync();
+        _popup.GhostToggleRequested+= (_, _) => ToggleGhostMode();
+        _popup.LogoTapped          += (_, _) => OnLogoTap();
+        _popup.FormClosed          += (_, _) => _popup = null;
         _popup.ShowNearCursor();
     }
 
@@ -299,6 +325,80 @@ public class TrayApp : ApplicationContext
             }
         }
         catch (LastFmException ex) { Log($"  ✗ Love failed: {ex.Message}"); }
+    }
+
+    // ── Ghost mode ────────────────────────────────────────────────────────────
+
+    private void ToggleGhostMode()
+    {
+        if (_config.IsGhostActive)
+        {
+            _config.GhostUntilUtc = null;
+            Log("👻 Ghost mode disabled.");
+        }
+        else
+        {
+            var until = DateTime.UtcNow.AddHours(6);
+            _config.GhostUntilUtc = until;
+            Log($"👻 Ghost mode on for 6h (until {until.ToLocalTime():HH:mm}).");
+        }
+        _config.Save();
+        UpdateTrayVisuals();
+    }
+
+    /// <summary>Auto-disable ghost mode when its expiry passes.</summary>
+    private void TickGhostExpiry()
+    {
+        if (_config.GhostUntilUtc is { } until && until <= DateTime.UtcNow)
+        {
+            _config.GhostUntilUtc = null;
+            _config.Save();
+            Log("👻 Ghost mode expired.");
+            UpdateTrayVisuals();
+        }
+    }
+
+    // ── Easter egg ────────────────────────────────────────────────────────────
+
+    private void OnLogoTap()
+    {
+        if (_config.RetroIconUnlocked) return; // Already unlocked, just spin
+
+        _config.LogoClicks++;
+        const int target = 32;
+
+        // Tease only after 8 clicks so it doesn't reveal too early
+        if (_config.LogoClicks >= 8 && _config.LogoClicks < target)
+            _tray.Text = $"WinScrobb  ({_config.LogoClicks}/{target})";
+
+        if (_config.LogoClicks >= target)
+        {
+            _config.RetroIconUnlocked = true;
+            _config.UseRetroIcon      = true;
+            Log("✨ Retro icon unlocked!");
+
+            _tray.BalloonTipTitle = "Retro icon unlocked!";
+            _tray.BalloonTipText  = "Find it in Settings → Personalization.";
+            _tray.BalloonTipIcon  = ToolTipIcon.Info;
+            _tray.ShowBalloonTip(6000);
+
+            UpdateTrayVisuals();
+        }
+        _config.Save();
+    }
+
+    // ── Tray visuals ──────────────────────────────────────────────────────────
+
+    private void UpdateTrayVisuals()
+    {
+        _tray.Icon = LoadTrayIcon(_config.IsGhostActive, _config.UseRetroIcon && _config.RetroIconUnlocked);
+
+        if (_config.IsGhostActive)
+        {
+            var rem = _config.GhostUntilUtc!.Value - DateTime.UtcNow;
+            _tray.Text = $"WinScrobb (Ghost — {(int)rem.TotalHours}h {rem.Minutes:00}m left)";
+        }
+        else _tray.Text = "WinScrobb";
     }
 
     // ── Settings ──────────────────────────────────────────────────────────────
@@ -343,9 +443,16 @@ public class TrayApp : ApplicationContext
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    private static Icon LoadTrayIcon()
+    private static Icon LoadTrayIcon(bool ghost = false, bool retro = false)
     {
-        foreach (var name in new[] { "logosmall.png", "icon.ico" })
+        // Priority: ghost overrides everything > retro > regular
+        var preferred = ghost
+            ? new[] { "ghost.png", "logosmall.png", "icon.ico" }
+            : retro
+                ? new[] { "retroicon.png", "logosmall.png", "icon.ico" }
+                : new[] { "logosmall.png", "icon.ico" };
+
+        foreach (var name in preferred)
         {
             var path = FluentTheme.FindAsset(name);
             if (path is null) continue;

@@ -6,6 +6,10 @@ on:
       - 'v*'          # triggers on v1.0.1, v1.2.0, etc.
   workflow_dispatch:  # manual run from the Actions tab
 
+# Required so the softprops/action-gh-release step can create a Release
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: windows-latest

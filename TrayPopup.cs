@@ -17,6 +17,8 @@ public class TrayPopup : Form
     public event EventHandler? LoveToggled;
     public event EventHandler? UpdateRequested;
     public event EventHandler? SyncIPodRequested;
+    public event EventHandler? GhostToggleRequested;
+    public event EventHandler? LogoTapped;
 
     [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     public IReadOnlyList<string> LogEntries { get; set; } = [];
@@ -33,10 +35,17 @@ public class TrayPopup : Form
     private static readonly string GlyphLog      = ""; // ViewAll
     private static readonly string GlyphQuit     = ""; // PowerButton
 
+    private readonly DateTime? _ghostUntil;
+    private readonly bool       _logoUnlocked;
+
     public TrayPopup(string username, string? nowPlaying, string? nowPlayingArtist,
                      bool isLoved = false, UpdateInfo? update = null,
-                     IPodDeviceInfo? iPod = null, int iPodNewPlays = 0)
+                     IPodDeviceInfo? iPod = null, int iPodNewPlays = 0,
+                     DateTime? ghostUntil = null, bool retroIconUnlocked = false)
     {
+        _ghostUntil   = ghostUntil;
+        _logoUnlocked = retroIconUnlocked;
+
         FormBorderStyle = FormBorderStyle.None;
         ShowInTaskbar   = false;
         TopMost         = true;
@@ -62,6 +71,10 @@ public class TrayPopup : Form
         if (iPod is not null)   y = AddIPodBanner(y, iPod, iPodNewPlays);
         y = AddNowPlaying(y, nowPlaying, nowPlayingArtist, isLoved);
 
+        // Ghost mode action — sits prominently between now-playing and the menu
+        AddDivider(ref y);
+        y = AddGhostRow(y);
+
         AddDivider(ref y);
 
         y = AddMenuItem(y, GlyphSettings, "Settings…", () => { Close(); SettingsRequested?.Invoke(this, EventArgs.Empty); });
@@ -85,16 +98,20 @@ public class TrayPopup : Form
         const int h = 68;
         var panel = new Panel { BackColor = FluentTheme.Surface, Location = new Point(0, y), Size = new Size(W, h) };
 
-        var logoPath = FluentTheme.FindAsset("logosmall.png");
-        if (logoPath != null)
-            panel.Controls.Add(new PictureBox
+        // Spinning logo — clickable, drives the retro-icon easter egg
+        var iconAsset = (_logoUnlocked ? FluentTheme.FindAsset("retroicon.png") : null)
+                        ?? FluentTheme.FindAsset("logosmall.png");
+        if (iconAsset != null)
+        {
+            var spin = new SpinningLogo
             {
-                Image     = Image.FromFile(logoPath),
-                SizeMode  = PictureBoxSizeMode.Zoom,
-                Size      = new Size(32, 32),
-                Location  = new Point(14, 18),
-                BackColor = Color.Transparent,
-            });
+                Size      = new Size(36, 36),
+                Location  = new Point(12, 16),
+                LogoImage = Image.FromFile(iconAsset),
+            };
+            spin.LogoClicked += (_, _) => LogoTapped?.Invoke(this, EventArgs.Empty);
+            panel.Controls.Add(spin);
+        }
 
         panel.Controls.Add(new Label
         {
@@ -224,6 +241,77 @@ public class TrayPopup : Form
         return y + h;
     }
 
+    // ── Ghost mode row ────────────────────────────────────────────────────────
+
+    private int AddGhostRow(int y)
+    {
+        const int h     = 50;
+        bool active     = _ghostUntil.HasValue && _ghostUntil.Value > DateTime.UtcNow;
+        var  isDk       = FluentTheme.IsDarkMode();
+
+        // When active, give the row an unmistakable purple tint
+        var bg = active
+            ? (isDk ? Color.FromArgb(54, 38, 70) : Color.FromArgb(232, 220, 244))
+            : FluentTheme.Surface;
+
+        var panel = new Panel { BackColor = bg, Location = new Point(0, y), Size = new Size(W, h), Cursor = Cursors.Hand };
+        panel.Click += (_, _) => { Close(); GhostToggleRequested?.Invoke(this, EventArgs.Empty); };
+
+        // Ghost glyph
+        var glyph = new Label
+        {
+            Text      = "👻",
+            Font      = new Font("Segoe UI Emoji", 14f),
+            ForeColor = active ? Color.FromArgb(196, 160, 232) : FluentTheme.TextMuted,
+            AutoSize  = true,
+            Location  = new Point(14, 12),
+            BackColor = Color.Transparent,
+        };
+        glyph.Click += (_, _) => { Close(); GhostToggleRequested?.Invoke(this, EventArgs.Empty); };
+        panel.Controls.Add(glyph);
+
+        // Title + subtitle
+        var title = new Label
+        {
+            Text      = active ? "Ghost mode is on" : "Activate Ghost Mode",
+            Font      = FluentTheme.Body(9.5f),
+            ForeColor = active ? Color.FromArgb(196, 160, 232) : FluentTheme.TextPrimary,
+            AutoSize  = true,
+            Location  = new Point(48, 7),
+            BackColor = Color.Transparent,
+        };
+        title.Click += (_, _) => { Close(); GhostToggleRequested?.Invoke(this, EventArgs.Empty); };
+        panel.Controls.Add(title);
+
+        string subText;
+        if (active)
+        {
+            var rem = _ghostUntil!.Value - DateTime.UtcNow;
+            subText = rem.TotalHours >= 1
+                ? $"hides activity for {(int)rem.TotalHours}h {rem.Minutes:00}m more — tap to disable"
+                : $"hides activity for {rem.Minutes}m {rem.Seconds:00}s more — tap to disable";
+        }
+        else
+        {
+            subText = "Pause scrobbling for 6 hours";
+        }
+
+        var sub = new Label
+        {
+            Text      = subText,
+            Font      = FluentTheme.Caption(8f),
+            ForeColor = FluentTheme.TextMuted,
+            AutoSize  = true,
+            Location  = new Point(48, 28),
+            BackColor = Color.Transparent,
+        };
+        sub.Click += (_, _) => { Close(); GhostToggleRequested?.Invoke(this, EventArgs.Empty); };
+        panel.Controls.Add(sub);
+
+        Controls.Add(panel);
+        return y + h;
+    }
+
     // ── Now Playing ───────────────────────────────────────────────────────────
 
     private int AddNowPlaying(int y, string? track, string? artist, bool isLoved)
@@ -338,121 +426,9 @@ public class TrayPopup : Form
     {
         _childOpen = true;
         Close();
-
-        var isDark = FluentTheme.IsDarkMode();
-        var bg     = isDark ? Color.FromArgb(18, 18, 18) : Color.FromArgb(248, 248, 248);
-        var fg     = isDark ? Color.FromArgb(212, 212, 212) : Color.FromArgb(24, 24, 24);
-        var hdrBg  = isDark ? Color.FromArgb(28, 28, 28) : Color.FromArgb(238, 238, 238);
-
-        using var dlg = new Form
-        {
-            Text          = "WinScrobb — Activity Log",
-            Size          = new Size(680, 480),
-            MinimumSize   = new Size(480, 320),
-            StartPosition = FormStartPosition.CenterScreen,
-            BackColor     = bg,
-            ForeColor     = fg,
-            Font          = FluentTheme.Body(),
-        };
-        dlg.Load += (_, _) => FluentTheme.ApplyChrome(dlg);
-        var icoPath = FluentTheme.FindAsset("icon.ico");
-        if (icoPath != null) try { dlg.Icon = new Icon(icoPath); } catch { }
-
-        // ── Header bar ────────────────────────────────────────────────────────
-        var header = new Panel { Dock = DockStyle.Top, Height = 50, BackColor = hdrBg };
-
-        var logoPath = FluentTheme.FindAsset("logosmall.png");
-        if (logoPath != null)
-            header.Controls.Add(new PictureBox
-            {
-                Image     = Image.FromFile(logoPath),
-                SizeMode  = PictureBoxSizeMode.Zoom,
-                Size      = new Size(22, 22),
-                Location  = new Point(14, 14),
-                BackColor = Color.Transparent,
-            });
-
-        header.Controls.Add(new Label
-        {
-            Text      = "Activity Log",
-            Font      = FluentTheme.Subtitle(11f),
-            ForeColor = fg,
-            AutoSize  = true,
-            Location  = new Point(logoPath != null ? 44 : 14, 15),
-            BackColor = Color.Transparent,
-        });
-
-        // Entry count, right-aligned, updates when layout runs
-        var countLbl = new Label
-        {
-            Text      = $"{LogEntries.Count} entries",
-            Font      = FluentTheme.Caption(8f),
-            ForeColor = FluentTheme.TextMuted,
-            AutoSize  = true,
-            BackColor = Color.Transparent,
-        };
-        header.Controls.Add(countLbl);
-        header.Layout += (_, _) =>
-            countLbl.Location = new Point(header.Width - countLbl.Width - 14,
-                                          (header.Height - countLbl.Height) / 2);
-
-        dlg.Controls.Add(header);
-
-        // Divider below header
-        dlg.Controls.Add(new Panel { Dock = DockStyle.Top, Height = 1, BackColor = FluentTheme.Divider });
-
-        // ── Log text area ─────────────────────────────────────────────────────
-        var rawText = LogEntries.Count == 0
-            ? "  (no log entries yet)"
-            : string.Join(Environment.NewLine, LogEntries);
-
-        var box = new RichTextBox
-        {
-            Dock        = DockStyle.Fill,
-            ReadOnly    = true,
-            BorderStyle = BorderStyle.None,
-            BackColor   = bg,
-            ForeColor   = fg,
-            Font        = new Font("Cascadia Mono", 9f),
-            Text        = rawText,
-            Padding     = new Padding(10),
-            ScrollBars  = RichTextBoxScrollBars.Vertical,
-            WordWrap    = false,
-        };
-
-        dlg.Controls.Add(box);
-
-        // Colour [HH:mm:ss] timestamps in accent colour, then scroll to bottom
-        dlg.Shown += (_, _) =>
-        {
-            ColourTimestamps(box, FluentTheme.Accent);
-            box.SelectionStart = box.Text.Length;
-            box.ScrollToCaret();
-        };
-
+        using var dlg = new LogViewerForm(LogEntries);
         dlg.ShowDialog();
         _childOpen = false;
-    }
-
-    /// <summary>Highlights [timestamp] tokens in accent colour inside a RichTextBox.</summary>
-    private static void ColourTimestamps(RichTextBox box, Color accent)
-    {
-        var full = box.Text;
-        int i = 0;
-        while (i < full.Length)
-        {
-            int open  = full.IndexOf('[', i);
-            if (open < 0) break;
-            int close = full.IndexOf(']', open);
-            if (close < 0) break;
-
-            box.Select(open, close - open + 1);
-            box.SelectionColor = accent;
-            i = close + 1;
-        }
-        // Reset selection so keyboard/scroll works normally
-        box.Select(0, 0);
-        box.SelectionColor = box.ForeColor;
     }
 
     // ── DWM chrome ────────────────────────────────────────────────────────────
@@ -483,8 +459,10 @@ public class TrayPopup : Form
 
     public static TrayPopup Create(string username, string? nowPlaying, string? nowPlayingArtist,
                                    bool isLoved = false, UpdateInfo? update = null,
-                                   IPodDeviceInfo? iPod = null, int iPodNewPlays = 0)
-        => new(username, nowPlaying, nowPlayingArtist, isLoved, update, iPod, iPodNewPlays);
+                                   IPodDeviceInfo? iPod = null, int iPodNewPlays = 0,
+                                   DateTime? ghostUntil = null, bool retroIconUnlocked = false)
+        => new(username, nowPlaying, nowPlayingArtist, isLoved, update, iPod, iPodNewPlays,
+               ghostUntil, retroIconUnlocked);
 
     public void ShowNearCursor()
     {

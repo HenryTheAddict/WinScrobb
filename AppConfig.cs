@@ -13,6 +13,18 @@ public class AppConfig
     public int PollIntervalSeconds { get; set; } = 3;
     public bool RunAtStartup { get; set; } = true;
 
+    // ── Ghost mode (private listening) ────────────────────────────────────────
+    public DateTime? GhostUntilUtc { get; set; }
+
+    [JsonIgnore]
+    public bool IsGhostActive =>
+        GhostUntilUtc.HasValue && GhostUntilUtc.Value > DateTime.UtcNow;
+
+    // ── Easter egg / icon style ───────────────────────────────────────────────
+    public int  LogoClicks        { get; set; } = 0;
+    public bool RetroIconUnlocked { get; set; } = false;
+    public bool UseRetroIcon      { get; set; } = false;
+
     // ── iPod sync ─────────────────────────────────────────────────────────────
     public bool IPodSyncEnabled { get; set; } = true;
     public bool IPodAutoSyncOnConnect { get; set; } = false;

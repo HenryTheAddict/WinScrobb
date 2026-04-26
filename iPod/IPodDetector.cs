@@ -27,6 +27,7 @@ public static class IPodDetector
                 var dbPath        = Path.Combine(iTunesDir, "iTunesDB");
                 var cdbPath       = Path.Combine(iTunesDir, "iTunesCDB");
                 var playCountPath = Path.Combine(iTunesDir, "Play Counts");
+                var statsPath     = Path.Combine(iTunesDir, "iTunesStats");
 
                 bool hasDb  = File.Exists(dbPath);
                 bool hasCdb = File.Exists(cdbPath);
@@ -39,6 +40,7 @@ public static class IPodDetector
                     ITunesDbPath     = hasDb ? dbPath : cdbPath,
                     IsCompressed     = hasCdb && !hasDb,
                     PlayCountsPath   = File.Exists(playCountPath) ? playCountPath : null,
+                    ITunesStatsPath  = File.Exists(statsPath)     ? statsPath     : null,
                 });
             }
             catch { /* drive not accessible — skip */ }
@@ -68,11 +70,12 @@ public static class IPodDetector
 
 public record IPodDeviceInfo
 {
-    public required string  MountPath      { get; init; }
-    public required string  Name           { get; init; }
-    public required string  ITunesDbPath   { get; init; }
-    public required bool    IsCompressed   { get; init; }
-    public          string? PlayCountsPath { get; init; }
+    public required string  MountPath        { get; init; }
+    public required string  Name             { get; init; }
+    public required string  ITunesDbPath     { get; init; }
+    public required bool    IsCompressed     { get; init; }
+    public          string? PlayCountsPath   { get; init; }
+    public          string? ITunesStatsPath  { get; init; }
 
     public string Id => MountPath.TrimEnd('\\').ToUpperInvariant();
 }

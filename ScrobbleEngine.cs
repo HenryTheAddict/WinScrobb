@@ -34,10 +34,8 @@ public class ScrobbleEngine(LastFmClient client, Action<string> log)
             var blockedKey = snapshot.TrackKey;
             if (blockedKey != _lastBlockedKey)
             {
-                var typeLabel  = snapshot.PlaybackType?.ToString() ?? "Unknown";
-                var albumHint  = string.IsNullOrWhiteSpace(snapshot.Album) ? "no album" : $"album: {snapshot.Album}";
-                var sourceHint = string.IsNullOrWhiteSpace(snapshot.SourceApp) ? "" : $", src: {snapshot.SourceApp}";
-                log($"Skipped ({typeLabel}, {albumHint}{sourceHint}): {snapshot.Artist} — {snapshot.Title}");
+                var src = ShortSource(snapshot.SourceApp);
+                log($"⊘ {snapshot.Artist} — {snapshot.Title}  ({src})");
                 _lastBlockedKey = blockedKey;
             }
             snapshot = null;
@@ -92,6 +90,25 @@ public class ScrobbleEngine(LastFmClient client, Action<string> log)
 
     private static double ScrobbleThreshold(double duration) =>
         duration > 0 ? Math.Min(duration / 2, MaxScrobbleSeconds) : MaxScrobbleSeconds;
+
+    /// <summary>
+    /// Reduce SMTC AUMIDs (e.g. "Helium.XXD5WR4HHS7TQABFM2HDBXBUWE!App") down to
+    /// a friendly process-ish name for logs. Falls back to the executable name
+    /// when an AUMID isn't present.
+    /// </summary>
+    private static string ShortSource(string raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return "unknown";
+        // Strip "App!ID" suffix
+        var bang = raw.IndexOf('!');
+        var s = bang > 0 ? raw[..bang] : raw;
+        // Take first dotted segment ("Helium.XXX..." → "Helium")
+        var dot = s.IndexOf('.');
+        if (dot > 0) s = s[..dot];
+        // Strip ".exe" if present
+        if (s.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) s = s[..^4];
+        return s;
+    }
 
     private async Task TryNowPlayingAsync(TrackState state)
     {
