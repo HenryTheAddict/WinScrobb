@@ -52,9 +52,13 @@ public static class PlayCountsParser
 
             // Skip entries with no actual activity
             if (playCount == 0 && skipCount == 0) continue;
-            if (lastPlayed == 0) continue;
 
-            entries.Add(new Entry(i, MacTime(lastPlayed), playCount, skipCount));
+            // Nano 3G firmware sometimes writes lastPlayed=0 even for real plays.
+            // Return DateTime.MinValue as a sentinel — the sync engine substitutes
+            // the Play Counts file mtime so the watermark stays stable.
+            var ts = lastPlayed == 0 ? DateTime.MinValue : MacTime(lastPlayed);
+
+            entries.Add(new Entry(i, ts, playCount, skipCount));
         }
 
         return entries;

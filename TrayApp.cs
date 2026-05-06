@@ -104,13 +104,12 @@ public class TrayApp : ApplicationContext
 
     private void ScanForIPods()
     {
-        if (!_config.IPodSyncEnabled || _ipodSyncing || _client is null) return;
-        if (_config.IsGhostActive) return; // Don't scrobble from iPod during ghost mode
+        if (_ipodSyncing || _client is null) return;
 
         try
         {
-            var devices  = IPodDetector.FindConnectedIPods();
-            var current  = devices.FirstOrDefault();
+            var devices = IPodDetector.FindConnectedIPods();
+            var current = devices.FirstOrDefault();
 
             // Disconnect detection
             if (current is null)
@@ -118,7 +117,7 @@ public class TrayApp : ApplicationContext
                 if (_connectedIPod is not null)
                 {
                     Log($"iPod disconnected: {_connectedIPod.Name}");
-                    _connectedIPod = null;
+                    _connectedIPod    = null;
                     _ipodNewPlayCount = 0;
                 }
                 return;
@@ -127,17 +126,21 @@ public class TrayApp : ApplicationContext
             // Same device still connected — refresh the play count silently
             if (_connectedIPod?.Id == current.Id)
             {
-                _ipodNewPlayCount = IPodSyncEngine.CountNewPlays(current, _config);
+                if (_config.IPodSyncEnabled)
+                    _ipodNewPlayCount = IPodSyncEngine.CountNewPlays(current, _config);
                 return;
             }
 
             // New connection
             _connectedIPod    = current;
-            _ipodNewPlayCount = IPodSyncEngine.CountNewPlays(current, _config);
-            Log($"iPod connected: {current.Name} ({_ipodNewPlayCount} new plays)");
+            _ipodNewPlayCount = _config.IPodSyncEnabled
+                ? IPodSyncEngine.CountNewPlays(current, _config)
+                : 0;
+            Log($"iPod connected: {current.Name}" +
+                (_config.IPodSyncEnabled ? $" ({_ipodNewPlayCount} new plays)" : " (sync disabled)"));
 
-            // First-time-this-session notification
-            if (_seenIPodIds.Add(current.Id))
+            // First-time-this-session notification + auto-sync (skip both during ghost mode)
+            if (_seenIPodIds.Add(current.Id) && _config.IPodSyncEnabled && !_config.IsGhostActive)
             {
                 if (_ipodNewPlayCount > 0)
                 {
@@ -152,6 +155,25 @@ public class TrayApp : ApplicationContext
             }
         }
         catch (Exception ex) { Log($"iPod scan error: {ex.Message}"); }
+    }
+
+    private void ToggleIPodSync()
+    {
+        _config.IPodSyncEnabled = !_config.IPodSyncEnabled;
+        _config.Save();
+
+        if (_config.IPodSyncEnabled)
+        {
+            Log("iPod sync enabled.");
+            // Immediately refresh play count now that sync is on
+            if (_connectedIPod is not null)
+                _ipodNewPlayCount = IPodSyncEngine.CountNewPlays(_connectedIPod, _config);
+        }
+        else
+        {
+            Log("iPod sync disabled.");
+            _ipodNewPlayCount = 0;
+        }
     }
 
     private void OpenIPodForm()
@@ -301,17 +323,19 @@ public class TrayApp : ApplicationContext
             _config.Username, _nowPlayingTrack, _nowPlayingArtist,
             _currentTrackLoved, _pendingUpdate,
             _connectedIPod, _ipodNewPlayCount,
-            _config.GhostUntilUtc, _config.RetroIconUnlocked);
+            _config.GhostUntilUtc, _config.RetroIconUnlocked,
+            _config.IPodSyncEnabled);
 
-        _popup.LogEntries          = _log;
-        _popup.SettingsRequested   += (_, _) => ShowSettings();
-        _popup.QuitRequested       += (_, _) => ExitApp();
-        _popup.LoveToggled         += (_, _) => ToggleLove();
-        _popup.UpdateRequested     += (_, _) => InstallUpdate();
-        _popup.SyncIPodRequested   += (_, _) => OpenIPodForm();
-        _popup.GhostToggleRequested+= (_, _) => ToggleGhostMode();
-        _popup.LogoTapped          += (_, _) => OnLogoTap();
-        _popup.FormClosed          += (_, _) => _popup = null;
+        _popup.LogEntries              = _log;
+        _popup.SettingsRequested       += (_, _) => ShowSettings();
+        _popup.QuitRequested           += (_, _) => ExitApp();
+        _popup.LoveToggled             += (_, _) => ToggleLove();
+        _popup.UpdateRequested         += (_, _) => InstallUpdate();
+        _popup.SyncIPodRequested       += (_, _) => OpenIPodForm();
+        _popup.GhostToggleRequested    += (_, _) => ToggleGhostMode();
+        _popup.LogoTapped              += (_, _) => OnLogoTap();
+        _popup.IPodSyncToggleRequested += (_, _) => ToggleIPodSync();
+        _popup.FormClosed              += (_, _) => _popup = null;
         _popup.ShowNearCursor();
     }
 

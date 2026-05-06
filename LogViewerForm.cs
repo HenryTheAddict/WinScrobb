@@ -7,8 +7,8 @@ namespace WinScrobb;
 
 /// <summary>
 /// Modern log viewer — sticky header with logo + title, segmented filter chips
-/// (All / Scrobbles / iPod / Errors / Skipped), live search, and syntax-coloured
-/// monospace body.
+/// (All / Scrobbles / iPod / Errors / Skipped), live search, syntax-coloured
+/// monospace body, and a one-click copy button.
 /// </summary>
 public sealed class LogViewerForm : Form
 {
@@ -31,7 +31,7 @@ public sealed class LogViewerForm : Form
         _entries = entries;
 
         Text          = "WinScrobb — Activity Log";
-        Size          = new Size(820, 580);
+        Size          = new Size(840, 600);
         MinimumSize   = new Size(560, 380);
         StartPosition = FormStartPosition.CenterScreen;
         BackColor     = FluentTheme.Surface;
@@ -42,7 +42,8 @@ public sealed class LogViewerForm : Form
         if (icoPath != null) try { Icon = new Icon(icoPath); } catch { }
 
         // ── Top bar (logo + title + count) ───────────────────────────────────
-        var hdrBg  = FluentTheme.IsDarkMode() ? Color.FromArgb(28, 28, 32) : Color.FromArgb(238, 238, 241);
+        var isDk   = FluentTheme.IsDarkMode();
+        var hdrBg  = isDk ? Color.FromArgb(28, 28, 32) : Color.FromArgb(238, 238, 241);
         var topBar = new Panel { Dock = DockStyle.Top, Height = 56, BackColor = hdrBg };
 
         var logoPath = FluentTheme.FindAsset("logosmall.png");
@@ -81,7 +82,7 @@ public sealed class LogViewerForm : Form
 
         Controls.Add(topBar);
 
-        // ── Toolbar (filter chips + search) ──────────────────────────────────
+        // ── Toolbar (filter chips + search + copy) ───────────────────────────
         var toolbar = new Panel { Dock = DockStyle.Top, Height = 50, BackColor = FluentTheme.Surface };
 
         AddChip(toolbar, "All",       FilterKind.All,       16);
@@ -98,30 +99,49 @@ public sealed class LogViewerForm : Form
             BackColor       = FluentTheme.InputBg,
             ForeColor       = FluentTheme.TextPrimary,
             PlaceholderText = "Filter…",
-            Width           = 220,
+            Width           = 200,
             Height          = 26,
         };
         _search.TextChanged += (_, _) => { _filter = _search.Text; Render(); };
         toolbar.Controls.Add(_search);
 
+        // Copy-to-clipboard button
+        var copyBtn = new Label
+        {
+            Text      = "Copy",
+            Font      = FluentTheme.Caption(8.5f),
+            ForeColor = FluentTheme.TextMuted,
+            AutoSize  = true,
+            Cursor    = Cursors.Hand,
+            BackColor = Color.Transparent,
+        };
+        copyBtn.Click += (_, _) =>
+        {
+            var visible = _entries.Where(MatchesFilters).ToList();
+            if (visible.Count > 0)
+                Clipboard.SetText(string.Join('\n', visible));
+        };
+        toolbar.Controls.Add(copyBtn);
+
         toolbar.Layout += (_, _) =>
         {
-            // Pack chips left-to-right
             int x = 16;
             foreach (var c in _chips)
             {
                 c.Location = new Point(x, (toolbar.Height - c.Height) / 2);
                 x = c.Right + 6;
             }
-            _search.Location = new Point(toolbar.Width - _search.Width - 16,
-                                         (toolbar.Height - _search.Height) / 2);
+            copyBtn.Location  = new Point(toolbar.Width - copyBtn.Width - 16,
+                                          (toolbar.Height - copyBtn.Height) / 2);
+            _search.Location  = new Point(copyBtn.Left - _search.Width - 10,
+                                          (toolbar.Height - _search.Height) / 2);
         };
 
         Controls.Add(toolbar);
         Controls.Add(new Panel { Dock = DockStyle.Top, Height = 1, BackColor = FluentTheme.Divider });
 
         // ── Body ──────────────────────────────────────────────────────────────
-        var bodyBg = FluentTheme.IsDarkMode() ? Color.FromArgb(20, 20, 22) : Color.FromArgb(248, 248, 250);
+        var bodyBg = isDk ? Color.FromArgb(20, 20, 22) : Color.FromArgb(248, 248, 250);
 
         _box = new RichTextBox
         {
@@ -130,7 +150,7 @@ public sealed class LogViewerForm : Form
             BorderStyle = BorderStyle.None,
             BackColor   = bodyBg,
             ForeColor   = FluentTheme.TextPrimary,
-            Font        = new Font("Cascadia Mono", 9.25f),
+            Font        = new Font("Cascadia Mono", 9.5f),
             ScrollBars  = RichTextBoxScrollBars.Vertical,
             WordWrap    = false,
             DetectUrls  = false,
@@ -171,10 +191,11 @@ public sealed class LogViewerForm : Form
 
         if (lines.Count == 0)
         {
-            _box.SelectionColor = FluentTheme.TextMuted;
+            _box.SelectionIndent = 8;
+            _box.SelectionColor  = FluentTheme.TextMuted;
             _box.AppendText(_entries.Count == 0
-                ? "  (no log entries yet)"
-                : "  (no entries match the current filter)");
+                ? "(no log entries yet)"
+                : "(no entries match the current filter)");
         }
         else
         {
@@ -199,38 +220,47 @@ public sealed class LogViewerForm : Form
         return _kind switch
         {
             FilterKind.All       => true,
-            FilterKind.Scrobbles => line.Contains("Scrobbled", StringComparison.OrdinalIgnoreCase) ||
-                                    line.Contains("Now playing") ||
+            FilterKind.Scrobbles => line.Contains("Scrobbled",   StringComparison.OrdinalIgnoreCase) ||
+                                    line.Contains("Now playing")  ||
                                     line.Contains("Now-playing sent"),
             FilterKind.IPod      => line.Contains("iPod",   StringComparison.OrdinalIgnoreCase) ||
                                     line.Contains("iTunes", StringComparison.OrdinalIgnoreCase),
-            FilterKind.Errors    => line.Contains(" ✗ ") || line.Contains("failed", StringComparison.OrdinalIgnoreCase) ||
+            FilterKind.Errors    => line.Contains(" ✗ ")   || line.Contains("failed", StringComparison.OrdinalIgnoreCase) ||
                                     line.Contains("error",  StringComparison.OrdinalIgnoreCase),
             FilterKind.Skipped   => line.Contains(" ⊘ "),
-            _ => true,
+            _                    => true,
         };
     }
 
     private void AppendStyled(string line)
     {
         var m = TimestampRx.Match(line);
+
+        // Sub-entries (diagnostic lines starting with spaces) get a dimmer colour
+        // so they visually recede behind the main scrobble/event lines.
+        bool isSub = !m.Success && line.Length > 0 && line[0] == ' ';
+
         if (m.Success)
         {
-            _box.SelectionColor = FluentTheme.Accent;
+            // [HH:mm:ss] in accent blue
+            _box.SelectionIndent = 0;
+            _box.SelectionColor  = FluentTheme.Accent;
             _box.AppendText(m.Groups[1].Value);
+
             _box.SelectionColor = FluentTheme.TextPrimary;
             _box.AppendText(m.Groups[2].Value);
 
             var glyph = m.Groups[3].Value;
             _box.SelectionColor = glyph switch
             {
-                "✓"  => Color.FromArgb(108, 198, 122),
-                "✗"  => Color.FromArgb(232, 96, 96),
-                "⊘"  => Color.FromArgb(232, 168, 88),
-                "♥"  => Color.FromArgb(232, 86, 124),
+                "✓"  => Color.FromArgb(108, 198, 122),  // green — success
+                "✗"  => Color.FromArgb(232,  96,  96),  // red   — error
+                "⊘"  => Color.FromArgb(200, 130,  50),  // amber — skipped
+                "⚠"  => Color.FromArgb(220, 170,  50),  // gold  — warning
+                "♥"  => Color.FromArgb(232,  86, 124),  // pink  — loved
                 "→"  => FluentTheme.TextMuted,
-                "✨" => Color.FromArgb(232, 196, 96),
-                "👻" => Color.FromArgb(196, 160, 232),
+                "✨" => Color.FromArgb(232, 196,  96),  // gold  — easter egg
+                "👻" => Color.FromArgb(196, 160, 232),  // purple — ghost
                 _    => FluentTheme.TextPrimary,
             };
             _box.AppendText(glyph);
@@ -238,11 +268,45 @@ public sealed class LogViewerForm : Form
             _box.SelectionColor = FluentTheme.TextPrimary;
             _box.AppendText(line[m.Length..]);
         }
+        else if (isSub)
+        {
+            // Indented diagnostic sub-entries — slightly dimmer, no indent shift needed
+            _box.SelectionIndent = 0;
+            _box.SelectionColor  = Color.FromArgb(
+                FluentTheme.IsDarkMode() ? 160 : 110,
+                FluentTheme.TextPrimary);
+
+            // Colour the glyph in sub-entries too
+            var trimmed = line.TrimStart();
+            if (trimmed.Length > 0 && "✓✗⊘⚠".Contains(trimmed[0]))
+            {
+                _box.AppendText(line[..^trimmed.Length]); // leading spaces
+                _box.SelectionColor = trimmed[0] switch
+                {
+                    '✓' => Color.FromArgb(108, 198, 122),
+                    '✗' => Color.FromArgb(232,  96,  96),
+                    '⊘' => Color.FromArgb(200, 130,  50),
+                    '⚠' => Color.FromArgb(220, 170,  50),
+                    _   => _box.SelectionColor,
+                };
+                _box.AppendText(trimmed[0].ToString());
+                _box.SelectionColor = Color.FromArgb(
+                    FluentTheme.IsDarkMode() ? 160 : 110,
+                    FluentTheme.TextPrimary);
+                _box.AppendText(trimmed[1..]);
+            }
+            else
+            {
+                _box.AppendText(line);
+            }
+        }
         else
         {
-            _box.SelectionColor = FluentTheme.TextPrimary;
+            _box.SelectionIndent = 0;
+            _box.SelectionColor  = FluentTheme.TextPrimary;
             _box.AppendText(line);
         }
+
         _box.AppendText("\n");
     }
 

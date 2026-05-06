@@ -7,7 +7,7 @@ public class SettingsForm : Form
     // ── Controls ──────────────────────────────────────────────────────────────
     private readonly FluentInput  _apiKey    = new();
     private readonly FluentInput  _apiSecret = new() { IsPassword = true };
-    private readonly FluentButton _saveBtn   = new() { Text = "Save && Authorize", IsAccent = true };
+    private readonly FluentButton _saveBtn   = new() { IsAccent = true };
     private readonly FluentButton _cancelBtn = new() { Text = "Cancel" };
     private readonly Label        _statusLbl = new();
     private readonly CheckBox     _startupCb = new();
@@ -30,9 +30,9 @@ public class SettingsForm : Form
 
     // ── Layout constants ──────────────────────────────────────────────────────
 
-    private const int W      = 500;   // client width
-    private const int Pad    = 24;    // outer horizontal padding
-    private const int CardW  = W - Pad * 2;
+    private const int W     = 500;   // client width
+    private const int Pad   = 24;    // outer horizontal padding
+    private const int CardW = W - Pad * 2;
 
     // ── Build ─────────────────────────────────────────────────────────────────
 
@@ -101,11 +101,20 @@ public class SettingsForm : Form
         };
         Controls.Add(stack);
 
-        AddSection(stack, "Last.fm account",            BuildAccountCard(),     expanded: true);
-        AddSection(stack, "Behavior",                   BuildBehaviorCard(),    expanded: true);
-        AddSection(stack, "iPod sync (Classic / Nano)", BuildIPodCard(),        expanded: true);
+        // Collapse the account section if creds are already configured — the user
+        // rarely needs to change them after initial setup.
+        bool alreadyAuth = Config.IsConfigured && Config.IsAuthenticated;
+
+        AddSection(stack, "Last.fm account",  BuildAccountCard(),     expanded: !alreadyAuth);
+        AddSection(stack, "Behavior",         BuildBehaviorCard(),    expanded: true);
+        AddSection(stack, "iPod",             BuildIPodCard(),        expanded: true);
         if (Config.RetroIconUnlocked)
-            AddSection(stack, "Personalization",        BuildPersonalizeCard(), expanded: true);
+            AddSection(stack, "Personalization", BuildPersonalizeCard(), expanded: false);
+
+        // Wire up dynamic save-button text after all controls exist
+        _apiKey.ValueChanged    += (_, _) => UpdateSaveBtnText();
+        _apiSecret.ValueChanged += (_, _) => UpdateSaveBtnText();
+        UpdateSaveBtnText();
 
         ResumeLayout(false);
     }
@@ -152,7 +161,6 @@ public class SettingsForm : Form
         };
         section.AddContent(content);
 
-        // Keep section width matched to the FlowLayoutPanel
         host.SizeChanged += (_, _) =>
             section.Width = host.ClientSize.Width - host.Padding.Horizontal;
 
@@ -201,7 +209,7 @@ public class SettingsForm : Form
         return panel;
     }
 
-    // ── Behavior card (run at startup, etc.) ──────────────────────────────────
+    // ── Behavior card ─────────────────────────────────────────────────────────
     private Control BuildBehaviorCard()
     {
         var panel = new Panel { Width = CardW, Height = 40, BackColor = FluentTheme.Surface };
@@ -221,50 +229,65 @@ public class SettingsForm : Form
     // ── iPod card ─────────────────────────────────────────────────────────────
     private Control BuildIPodCard()
     {
-        var panel = new Panel { Width = CardW, Height = 130, BackColor = FluentTheme.Surface };
+        var panel = new Panel { Width = CardW, BackColor = FluentTheme.Surface };
+        int cy = 4;
 
+        // Connection status
         var connected = IPodDetector.FindConnectedIPods();
         _ipodStatusLbl.Text = connected.Count == 0
-            ? "No iPod connected — connect one to see options here."
+            ? "No iPod connected."
             : $"Connected: {connected[0].Name}"
-              + (connected[0].IsCompressed ? "  (iTunesCDB)" : "");
+              + (connected[0].IsCompressed ? "  (iTunesCDB)" : "  (iTunesDB)");
         _ipodStatusLbl.Font      = FluentTheme.Caption(8.5f);
         _ipodStatusLbl.ForeColor = connected.Count == 0
             ? FluentTheme.TextMuted
             : FluentTheme.Accent;
         _ipodStatusLbl.AutoSize  = true;
-        _ipodStatusLbl.Location  = new Point(0, 4);
+        _ipodStatusLbl.Location  = new Point(0, cy);
         _ipodStatusLbl.BackColor = FluentTheme.Surface;
         panel.Controls.Add(_ipodStatusLbl);
+        cy += 28;
 
+        // Enable toggle
         _ipodEnableCb.Text      = "Enable iPod sync";
         _ipodEnableCb.Font      = FluentTheme.Body(9.5f);
         _ipodEnableCb.ForeColor = FluentTheme.TextPrimary;
         _ipodEnableCb.BackColor = FluentTheme.Surface;
         _ipodEnableCb.Checked   = Config.IPodSyncEnabled;
         _ipodEnableCb.AutoSize  = true;
-        _ipodEnableCb.Location  = new Point(0, 32);
+        _ipodEnableCb.Location  = new Point(0, cy);
         panel.Controls.Add(_ipodEnableCb);
+        cy += 30;
 
-        _ipodAutoSyncCb.Text      = "Automatically sync when iPod is connected";
+        // Auto-sync toggle (indented under enable)
+        _ipodAutoSyncCb.Text      = "Automatically sync when connected";
         _ipodAutoSyncCb.Font      = FluentTheme.Body(9.5f);
         _ipodAutoSyncCb.ForeColor = FluentTheme.TextPrimary;
         _ipodAutoSyncCb.BackColor = FluentTheme.Surface;
         _ipodAutoSyncCb.Checked   = Config.IPodAutoSyncOnConnect;
         _ipodAutoSyncCb.AutoSize  = true;
-        _ipodAutoSyncCb.Location  = new Point(0, 60);
+        _ipodAutoSyncCb.Location  = new Point(18, cy);
         panel.Controls.Add(_ipodAutoSyncCb);
+        cy += 30;
+
+        // Wire enable toggle to grey out auto-sync
+        void RefreshAutoSync()
+            => _ipodAutoSyncCb.Enabled = _ipodEnableCb.Checked;
+        _ipodEnableCb.CheckedChanged += (_, _) => RefreshAutoSync();
+        RefreshAutoSync();
 
         panel.Controls.Add(new Label
         {
-            Text      = "Reads new plays from iPod_Control/iTunes/Play Counts",
+            Text      = "Reads new plays from iPod_Control/iTunes/ on any iPod model",
             Font      = FluentTheme.Caption(8f),
             ForeColor = FluentTheme.TextMuted,
             AutoSize  = true,
-            Location  = new Point(0, 92),
+            Location  = new Point(0, cy),
             BackColor = FluentTheme.Surface,
         });
+        cy += 22;
 
+        panel.Height = cy + 4;
         return panel;
     }
 
@@ -298,9 +321,6 @@ public class SettingsForm : Form
         BackColor = FluentTheme.Surface,
     };
 
-
-    // ── Small helpers ─────────────────────────────────────────────────────────
-
     private static Label SectionLabel(string text, int x, int y) => new()
     {
         Text      = text,
@@ -318,9 +338,20 @@ public class SettingsForm : Form
         ForeColor = FluentTheme.TextMuted,
         AutoSize  = true,
         Location  = new Point(x, y),
-        // BackColor must match card so it doesn't look odd
         BackColor = FluentTheme.Card,
     };
+
+    // ── Save button text ──────────────────────────────────────────────────────
+
+    private void UpdateSaveBtnText()
+    {
+        bool needsAuth =
+            _apiKey.Value.Trim()    != _origApiKey    ||
+            _apiSecret.Value.Trim() != _origApiSecret ||
+            string.IsNullOrEmpty(Config.SessionKey);
+
+        _saveBtn.Text = needsAuth ? "Save && Authorize" : "Save";
+    }
 
     private void SetIcon()
     {
@@ -347,7 +378,6 @@ public class SettingsForm : Form
             return;
         }
 
-        // ── Fast path: API creds unchanged → just save the toggles, skip Last.fm auth ──
         var newKey    = _apiKey.Value.Trim();
         var newSecret = _apiSecret.Value.Trim();
         bool credsUnchanged =
@@ -355,6 +385,7 @@ public class SettingsForm : Form
             newSecret == _origApiSecret &&
             !string.IsNullOrEmpty(Config.SessionKey);
 
+        // Fast path: creds unchanged — save toggles only, no Last.fm auth needed
         if (credsUnchanged)
         {
             Config.RunAtStartup          = _startupCb.Checked;
