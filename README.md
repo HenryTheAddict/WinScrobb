@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="logosmall.png" width="64" alt="WinScrobb" />
+  <img src="./assets/logosmall.png" width="64" alt="WinScrobb" />
 </p>
 
 # WinScrobb
