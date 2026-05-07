@@ -20,7 +20,6 @@ public class IPodSyncEngine
 
     public async Task<SyncSummary> SyncAsync(IPodDeviceInfo device, AppConfig config)
     {
-        // Diagnostic dump — helpful when an iPod connects but no plays show up
         _log($"iPod {device.Name}: reading library at {device.MountPath}…");
         if (device.IsCompressed) _log("  iTunesCDB detected — attempting QuickLZ decompression.");
         _log($"  iTunesDB: {(File.Exists(device.ITunesDbPath) ? new FileInfo(device.ITunesDbPath).Length + " bytes" : "missing")}");
@@ -37,40 +36,61 @@ public class IPodSyncEngine
 
         _log($"  Found {tracks.Count} tracks on device.");
 
-        // Read Play Counts (the file the iPod itself wrote since last iTunes sync)
-        var newPlays = device.PlayCountsPath is null
-            ? []
-            : PlayCountsParser.Parse(device.PlayCountsPath);
-        if (newPlays.Count > 0)
-            _log($"  Parsed {newPlays.Count} plays from Play Counts.");
+        var  newPlays         = new List<PlayCountsParser.Entry>();
+        bool usedStatsFallback = false;
+        var  statsFileMtime    = DateTime.MinValue;
 
-        // Fallback for Nano 3G+ where Play Counts is absent and iTunesStats is used.
-        // iTunesStats doesn't carry a precise per-play timestamp, so we synthesize
-        // a "now" timestamp shifted by a small offset — Last.fm dedupes this fine.
+        // Primary: Play Counts file written by the iPod firmware
+        if (device.PlayCountsPath is not null)
+        {
+            var rawPlays = PlayCountsParser.Parse(device.PlayCountsPath);
+            if (rawPlays.Count > 0)
+            {
+                // Nano 3G quirk: some firmware writes lastPlayed=0 (DateTime.MinValue sentinel).
+                // Substitute the file's own write-time spread across the entries so the watermark
+                // remains stable — we won't re-scrobble the same plays if the device stays connected.
+                var fileMtime = File.GetLastWriteTimeUtc(device.PlayCountsPath);
+                int total     = rawPlays.Count;
+                newPlays = rawPlays.Select((p, idx) =>
+                    p.LastPlayed == DateTime.MinValue
+                        ? p with { LastPlayed = fileMtime.AddSeconds(-(total - idx)) }
+                        : p).ToList();
+
+                _log($"  Parsed {newPlays.Count} plays from Play Counts.");
+            }
+        }
+
+        // Fallback: iTunesStats (Nano 3G+ when Play Counts is absent)
         if (newPlays.Count == 0 && device.ITunesStatsPath is not null)
         {
             try
             {
-                var stats = ITunesStatsParser.Parse(device.ITunesStatsPath);
-                _log($"  Parsed {stats.Count} plays from iTunesStats fallback.");
+                statsFileMtime = File.GetLastWriteTimeUtc(device.ITunesStatsPath);
+                var sinceUtcForStats = config.GetLastIPodSync(device.Id);
 
-                var nowUtc = DateTime.UtcNow;
-                int idx = 0;
-                foreach (var s in stats)
+                // Guard: only process if the file changed since our last sync.
+                // This prevents re-scrobbling the same entries when the device
+                // stays connected across multiple polling cycles.
+                if (statsFileMtime > sinceUtcForStats)
                 {
-                    // Spread synthesized timestamps a few minutes apart so Last.fm
-                    // shows them as distinct plays
-                    var fakeTs = nowUtc.AddMinutes(-(stats.Count - idx) * 4);
-                    newPlays.Add(new PlayCountsParser.Entry(s.TrackIndex, fakeTs, s.PlayCountDelta, s.SkipCountDelta));
-                    idx++;
+                    usedStatsFallback = true;
+                    var stats = ITunesStatsParser.Parse(device.ITunesStatsPath);
+                    _log($"  Parsed {stats.Count} plays from iTunesStats fallback.");
+
+                    int idx = 0;
+                    foreach (var s in stats.Where(s => s.PlayCountDelta > 0))
+                    {
+                        var fakeTs = statsFileMtime.AddMinutes(-(stats.Count - idx) * 4);
+                        newPlays.Add(new PlayCountsParser.Entry(s.TrackIndex, fakeTs, s.PlayCountDelta, s.SkipCountDelta));
+                        idx++;
+                    }
                 }
             }
             catch (Exception ex) { _log($"  ⚠ iTunesStats parse failed: {ex.Message}"); }
         }
 
-        // De-dupe against our own last-sync watermark (per-device)
         var sinceUtc = config.GetLastIPodSync(device.Id);
-        var fresh = newPlays.Where(p => p.LastPlayed > sinceUtc).ToList();
+        var fresh    = newPlays.Where(p => p.LastPlayed > sinceUtc).ToList();
 
         if (fresh.Count == 0)
         {
@@ -100,7 +120,6 @@ public class IPodSyncEngine
                 continue;
             }
 
-            // Last.fm rejects scrobbles for tracks shorter than 30 s
             if (t.DurationSec > 0 && t.DurationSec < 30) { skip++; continue; }
 
             try
@@ -118,23 +137,59 @@ public class IPodSyncEngine
             }
         }
 
-        // Save watermark so we don't re-scrobble these next time
-        config.SetLastIPodSync(device.Id, maxSeen);
+        // Watermark: for iTunesStats fallback use the file mtime as the watermark so that
+        // a still-connected device with an unchanged stats file isn't re-scrobbled next poll.
+        if (usedStatsFallback && ok > 0)
+            config.SetLastIPodSync(device.Id, statsFileMtime);
+        else if (maxSeen > sinceUtc)
+            config.SetLastIPodSync(device.Id, maxSeen);
+
         config.Save();
 
         _log($"iPod sync complete: {ok} scrobbled, {skip} skipped, {fail} failed.");
         return new SyncSummary(tracks.Count, fresh.Count, ok, skip, fail);
     }
 
-    /// <summary>Quick metadata-only check — useful for the popup banner.</summary>
+    /// <summary>
+    /// Quick metadata-only check — used for the popup banner play-count badge.
+    /// Also checks iTunesStats when Play Counts is absent (Nano 3G+ fallback).
+    /// </summary>
     public static int CountNewPlays(IPodDeviceInfo device, AppConfig config)
     {
-        if (device.PlayCountsPath is null) return 0;
-        try
+        var since = config.GetLastIPodSync(device.Id);
+
+        if (device.PlayCountsPath is not null)
         {
-            var since = config.GetLastIPodSync(device.Id);
-            return PlayCountsParser.Parse(device.PlayCountsPath).Count(p => p.LastPlayed > since);
+            try
+            {
+                var plays = PlayCountsParser.Parse(device.PlayCountsPath);
+                if (plays.Count > 0)
+                {
+                    var fileMtime = File.GetLastWriteTimeUtc(device.PlayCountsPath);
+                    return plays.Count(p =>
+                    {
+                        var ts = p.LastPlayed == DateTime.MinValue ? fileMtime : p.LastPlayed;
+                        return ts > since && p.PlayCount > 0;
+                    });
+                }
+            }
+            catch { }
         }
-        catch { return 0; }
+
+        // iTunesStats fallback: if the file is newer than the last sync watermark,
+        // sum up all play-count deltas as the "new plays" estimate.
+        if (device.ITunesStatsPath is not null)
+        {
+            try
+            {
+                var mtime = File.GetLastWriteTimeUtc(device.ITunesStatsPath);
+                if (mtime > since)
+                    return ITunesStatsParser.Parse(device.ITunesStatsPath)
+                                           .Sum(s => (int)s.PlayCountDelta);
+            }
+            catch { }
+        }
+
+        return 0;
     }
 }

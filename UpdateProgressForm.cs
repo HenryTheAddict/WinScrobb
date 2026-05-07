@@ -82,9 +82,9 @@ public sealed class UpdateProgressForm : Form
         if (IsDisposed) return;
         if (InvokeRequired) { Invoke(() => SetProgress(pct)); return; }
 
-        _bar.Value  = Math.Clamp(pct, 0, 100);
-        _pctLbl.Text = $"{pct}%";
-        _statusLbl.Text = pct >= 100 ? "Launching installer…" : "Downloading update…";
+        _bar.Value      = Math.Clamp(pct, 0, 100);
+        _pctLbl.Text    = $"{pct}%";
+        _statusLbl.Text = pct >= 100 ? "Restarting WinScrobb…" : "Downloading update…";
     }
 
     protected override void OnHandleCreated(EventArgs e)

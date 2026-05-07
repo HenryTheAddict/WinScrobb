@@ -19,29 +19,29 @@ public class TrayPopup : Form
     public event EventHandler? SyncIPodRequested;
     public event EventHandler? GhostToggleRequested;
     public event EventHandler? LogoTapped;
+    public event EventHandler? IPodSyncToggleRequested;
 
     [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     public IReadOnlyList<string> LogEntries { get; set; } = [];
 
     private const int W = 300;
 
-    // Set to true while a child dialog is open so OnDeactivate doesn't close the popup
     private bool _childOpen;
 
-    // Segoe MDL2 Assets codepoints kept as string literals so the editor
-    // can't mangle them — use explicit \u escapes throughout this file.
     private static readonly string GlyphMusic    = ""; // MusicNote
     private static readonly string GlyphSettings = ""; // Settings
     private static readonly string GlyphLog      = ""; // ViewAll
     private static readonly string GlyphQuit     = ""; // PowerButton
+    private static readonly string GlyphIPod     = ""; // Devices2 (EC0E)
 
     private readonly DateTime? _ghostUntil;
-    private readonly bool       _logoUnlocked;
+    private readonly bool      _logoUnlocked;
 
     public TrayPopup(string username, string? nowPlaying, string? nowPlayingArtist,
                      bool isLoved = false, UpdateInfo? update = null,
                      IPodDeviceInfo? iPod = null, int iPodNewPlays = 0,
-                     DateTime? ghostUntil = null, bool retroIconUnlocked = false)
+                     DateTime? ghostUntil = null, bool retroIconUnlocked = false,
+                     bool iPodSyncEnabled = true)
     {
         _ghostUntil   = ghostUntil;
         _logoUnlocked = retroIconUnlocked;
@@ -54,33 +54,36 @@ public class TrayPopup : Form
         ForeColor       = FluentTheme.TextPrimary;
         Font            = FluentTheme.Body();
 
-        Build(username, nowPlaying, nowPlayingArtist, isLoved, update, iPod, iPodNewPlays);
+        Build(username, nowPlaying, nowPlayingArtist, isLoved, update, iPod, iPodNewPlays, iPodSyncEnabled);
     }
 
     // ── Build ─────────────────────────────────────────────────────────────────
 
     private void Build(string username, string? nowPlaying, string? nowPlayingArtist,
                        bool isLoved, UpdateInfo? update,
-                       IPodDeviceInfo? iPod, int iPodNewPlays)
+                       IPodDeviceInfo? iPod, int iPodNewPlays, bool iPodSyncEnabled)
     {
         SuspendLayout();
         int y = 0;
 
         y = AddHeader(y, username);
-        if (update is not null) y = AddUpdateBanner(y, update);
-        if (iPod is not null)   y = AddIPodBanner(y, iPod, iPodNewPlays);
+        if (update is not null)         y = AddUpdateBanner(y, update);
+        // Always show the iPod section if a device is connected so the
+        // toggle is reachable even when sync is currently disabled.
+        if (iPod is not null)           y = AddIPodBanner(y, iPod, iPodNewPlays, iPodSyncEnabled);
+
         y = AddNowPlaying(y, nowPlaying, nowPlayingArtist, isLoved);
 
-        // Ghost mode action — sits prominently between now-playing and the menu
         AddDivider(ref y);
         y = AddGhostRow(y);
 
         AddDivider(ref y);
 
-        y = AddMenuItem(y, GlyphSettings, "Settings…", () => { Close(); SettingsRequested?.Invoke(this, EventArgs.Empty); });
-        y = AddMenuItem(y, GlyphLog,      "View Log…", ShowLog);
+        y = AddMenuItem(y, GlyphSettings, "Settings…",  () => { Close(); SettingsRequested?.Invoke(this, EventArgs.Empty); });
+        y = AddMenuItem(y, GlyphLog,      "View Log…",  ShowLog);
+        if (iPod is not null)
+            y = AddMenuItem(y, GlyphIPod, "iPod…",      () => { Close(); SyncIPodRequested?.Invoke(this, EventArgs.Empty); });
 
-        // Extra gap before Quit — makes it harder to accidentally hit
         AddDivider(ref y);
         y += 6;
 
@@ -98,7 +101,6 @@ public class TrayPopup : Form
         const int h = 68;
         var panel = new Panel { BackColor = FluentTheme.Surface, Location = new Point(0, y), Size = new Size(W, h) };
 
-        // Spinning logo — clickable, drives the retro-icon easter egg
         var iconAsset = (_logoUnlocked ? FluentTheme.FindAsset("retroicon.png") : null)
                         ?? FluentTheme.FindAsset("logosmall.png");
         if (iconAsset != null)
@@ -140,10 +142,10 @@ public class TrayPopup : Form
 
     private int AddUpdateBanner(int y, UpdateInfo update)
     {
-        const int h = 36;
-        var accent  = FluentTheme.Accent;
-        var bg      = Color.FromArgb(FluentTheme.IsDarkMode() ? 30 : 220,
-                                     accent.R, accent.G, accent.B);
+        const int h  = 36;
+        var accent   = FluentTheme.Accent;
+        var bg       = Color.FromArgb(FluentTheme.IsDarkMode() ? 30 : 220,
+                                      accent.R, accent.G, accent.B);
 
         var panel = new Panel { BackColor = bg, Location = new Point(0, y), Size = new Size(W, h) };
 
@@ -177,52 +179,77 @@ public class TrayPopup : Form
 
     // ── iPod banner ───────────────────────────────────────────────────────────
 
-    private int AddIPodBanner(int y, IPodDeviceInfo iPod, int newPlays)
+    private int AddIPodBanner(int y, IPodDeviceInfo iPod, int newPlays, bool syncEnabled)
     {
-        const int h    = 44;
-        var      isDk  = FluentTheme.IsDarkMode();
-        var      bg    = isDk ? Color.FromArgb(38, 42, 50) : Color.FromArgb(232, 236, 244);
-        var      fg    = FluentTheme.TextPrimary;
+        const int h   = 48;
+        var isDk      = FluentTheme.IsDarkMode();
+        var bg        = syncEnabled
+            ? (isDk ? Color.FromArgb(38, 42, 50) : Color.FromArgb(232, 236, 244))
+            : (isDk ? Color.FromArgb(36, 36, 36) : Color.FromArgb(242, 242, 242));
 
         var panel = new Panel { BackColor = bg, Location = new Point(0, y), Size = new Size(W, h) };
 
-        // iPod glyph (Segoe MDL2 EC0E "Devices2")
+        // Device glyph
         panel.Controls.Add(new Label
         {
-            Text      = "",
+            Text      = GlyphIPod,
             Font      = new Font("Segoe MDL2 Assets", 12f),
-            ForeColor = FluentTheme.Accent,
+            ForeColor = syncEnabled ? FluentTheme.Accent : FluentTheme.TextMuted,
             AutoSize  = true,
-            Location  = new Point(14, 13),
+            Location  = new Point(14, 15),
             BackColor = Color.Transparent,
         });
 
         panel.Controls.Add(new Label
         {
-            Text      = Truncate(iPod.Name, 26),
+            Text      = Truncate(iPod.Name, 24),
             Font      = FluentTheme.Body(9f),
-            ForeColor = fg,
+            ForeColor = syncEnabled ? FluentTheme.TextPrimary : FluentTheme.TextMuted,
             AutoSize  = true,
-            Location  = new Point(40, 6),
+            Location  = new Point(40, 7),
             BackColor = Color.Transparent,
         });
 
-        var subText = newPlays == 0
-            ? (iPod.IsCompressed ? "compressed library — open menu to sync" : "no new plays")
-            : $"{newPlays} new play{(newPlays == 1 ? "" : "s")}";
+        string subText;
+        if (!syncEnabled)
+            subText = "sync disabled";
+        else if (newPlays == 0)
+            subText = iPod.IsCompressed ? "compressed library — open to sync" : "no new plays";
+        else
+            subText = $"{newPlays} new play{(newPlays == 1 ? "" : "s")}";
+
         panel.Controls.Add(new Label
         {
             Text      = subText,
             Font      = FluentTheme.Caption(8f),
             ForeColor = FluentTheme.TextMuted,
             AutoSize  = true,
-            Location  = new Point(40, 24),
+            Location  = new Point(40, 27),
             BackColor = Color.Transparent,
         });
 
-        // Always offer the action — opening the iPod menu, which may sync or show details
+        // Toggle (on/off) on the right side
+        bool syncing = syncEnabled;
+        var toggleLbl = new Label
         {
-            var btn = new Label
+            Text      = syncEnabled ? "On" : "Off",
+            Font      = FluentTheme.Caption(8f),
+            ForeColor = syncEnabled ? FluentTheme.Accent : FluentTheme.TextMuted,
+            AutoSize  = true,
+            Cursor    = Cursors.Hand,
+            BackColor = Color.Transparent,
+        };
+        toggleLbl.Click += (_, _) =>
+        {
+            Close();
+            IPodSyncToggleRequested?.Invoke(this, EventArgs.Empty);
+        };
+        panel.Controls.Add(toggleLbl);
+
+        // Open-menu link (only shown when sync is on)
+        if (syncEnabled)
+        {
+            var openBtn = new Label
             {
                 Text      = newPlays > 0 ? "Sync →" : "Open →",
                 Font      = new Font(FluentTheme.Body(8.5f), FontStyle.Underline),
@@ -231,14 +258,22 @@ public class TrayPopup : Form
                 Cursor    = Cursors.Hand,
                 BackColor = Color.Transparent,
             };
-            btn.Click += (_, _) => { Close(); SyncIPodRequested?.Invoke(this, EventArgs.Empty); };
-            panel.Controls.Add(btn);
-            panel.Layout += (_, _) =>
-                btn.Location = new Point(W - btn.Width - 12, (h - btn.Height) / 2);
+            openBtn.Click += (_, _) => { Close(); SyncIPodRequested?.Invoke(this, EventArgs.Empty); };
+            panel.Controls.Add(openBtn);
 
-            // Make the whole banel clickable to open the dedicated menu
+            panel.Layout += (_, _) =>
+            {
+                openBtn.Location   = new Point(W - openBtn.Width - 12, (h - openBtn.Height) / 2);
+                toggleLbl.Location = new Point(openBtn.Left - toggleLbl.Width - 10, (h - toggleLbl.Height) / 2);
+            };
+
             panel.Cursor = Cursors.Hand;
             panel.Click += (_, _) => { Close(); SyncIPodRequested?.Invoke(this, EventArgs.Empty); };
+        }
+        else
+        {
+            panel.Layout += (_, _) =>
+                toggleLbl.Location = new Point(W - toggleLbl.Width - 12, (h - toggleLbl.Height) / 2);
         }
 
         Controls.Add(panel);
@@ -249,11 +284,10 @@ public class TrayPopup : Form
 
     private int AddGhostRow(int y)
     {
-        const int h     = 50;
-        bool active     = _ghostUntil.HasValue && _ghostUntil.Value > DateTime.UtcNow;
-        var  isDk       = FluentTheme.IsDarkMode();
+        const int h  = 50;
+        bool active  = _ghostUntil.HasValue && _ghostUntil.Value > DateTime.UtcNow;
+        var isDk     = FluentTheme.IsDarkMode();
 
-        // When active, give the row an unmistakable purple tint
         var bg = active
             ? (isDk ? Color.FromArgb(54, 38, 70) : Color.FromArgb(232, 220, 244))
             : FluentTheme.Surface;
@@ -261,7 +295,6 @@ public class TrayPopup : Form
         var panel = new Panel { BackColor = bg, Location = new Point(0, y), Size = new Size(W, h), Cursor = Cursors.Hand };
         panel.Click += (_, _) => { Close(); GhostToggleRequested?.Invoke(this, EventArgs.Empty); };
 
-        // Ghost glyph
         var glyph = new Label
         {
             Text      = "👻",
@@ -274,7 +307,6 @@ public class TrayPopup : Form
         glyph.Click += (_, _) => { Close(); GhostToggleRequested?.Invoke(this, EventArgs.Empty); };
         panel.Controls.Add(glyph);
 
-        // Title + subtitle
         var title = new Label
         {
             Text      = active ? "Ghost mode is on" : "Activate Ghost Mode",
@@ -326,7 +358,6 @@ public class TrayPopup : Form
 
         var panel = new Panel { BackColor = panelBg, Location = new Point(0, y), Size = new Size(W, h) };
 
-        // Music note glyph
         panel.Controls.Add(new Label
         {
             Text      = GlyphMusic,
@@ -358,7 +389,6 @@ public class TrayPopup : Form
                 BackColor = Color.Transparent,
             });
 
-            // ── Heart / love button ───────────────────────────────────────────
             bool loved = isLoved;
             var heart = new Label
             {
@@ -446,7 +476,6 @@ public class TrayPopup : Form
         int mica   = 2; DwmSetWindowAttribute(Handle, DWMWA_SYSTEMBACKDROP_TYPE, ref mica, sizeof(int));
     }
 
-    // Only auto-close on deactivate when no child dialog is open
     protected override void OnDeactivate(EventArgs e) { base.OnDeactivate(e); if (!_childOpen) Close(); }
 
     protected override void OnPaint(PaintEventArgs e)
@@ -464,9 +493,10 @@ public class TrayPopup : Form
     public static TrayPopup Create(string username, string? nowPlaying, string? nowPlayingArtist,
                                    bool isLoved = false, UpdateInfo? update = null,
                                    IPodDeviceInfo? iPod = null, int iPodNewPlays = 0,
-                                   DateTime? ghostUntil = null, bool retroIconUnlocked = false)
+                                   DateTime? ghostUntil = null, bool retroIconUnlocked = false,
+                                   bool iPodSyncEnabled = true)
         => new(username, nowPlaying, nowPlayingArtist, isLoved, update, iPod, iPodNewPlays,
-               ghostUntil, retroIconUnlocked);
+               ghostUntil, retroIconUnlocked, iPodSyncEnabled);
 
     public void ShowNearCursor()
     {
@@ -474,7 +504,6 @@ public class TrayPopup : Form
         var screen = Screen.FromPoint(cursor);
         int x = Math.Max(screen.WorkingArea.Left + 8,
             Math.Min(cursor.X - Width / 2, screen.WorkingArea.Right - Width - 8));
-        // 20px above taskbar — Quit stays comfortably away from the click target
         int y = screen.WorkingArea.Bottom - Height - 20;
         Location = new Point(x, y);
         Show();

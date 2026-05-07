@@ -90,6 +90,8 @@ public class FluentInput : UserControl
         set { _isPassword = value; _tb.UseSystemPasswordChar = value; _toggle.Visible = value; UpdateLayout(); }
     }
 
+    public event EventHandler? ValueChanged;
+
     public FluentInput()
     {
         SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
@@ -101,9 +103,10 @@ public class FluentInput : UserControl
         _tb.ForeColor   = FluentTheme.TextPrimary;
         _tb.Location    = new Point(11, 10);
 
-        _tb.Enter  += (_, _) => { _focused = true;  Invalidate(); };
-        _tb.Leave  += (_, _) => { _focused = false; Invalidate(); };
-        _tb.KeyDown += (_, e) => OnKeyDown(e);
+        _tb.Enter       += (_, _) => { _focused = true;  Invalidate(); };
+        _tb.Leave       += (_, _) => { _focused = false; Invalidate(); };
+        _tb.KeyDown     += (_, e) => OnKeyDown(e);
+        _tb.TextChanged += (_, e) => ValueChanged?.Invoke(this, e);
 
         // Segoe MDL2 Assets: E7B3 = view/eye, ED1A = hide
         _toggle.Text      = "";
