@@ -263,6 +263,74 @@ public class FluentButton : Control
     }
 }
 
+public class FluentToggle : Control
+{
+    private bool _checked;
+    private bool _hovered;
+
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    public bool Checked
+    {
+        get => _checked;
+        set
+        {
+            if (_checked == value) return;
+            _checked = value;
+            Invalidate();
+            CheckedChanged?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    public event EventHandler? CheckedChanged;
+
+    public FluentToggle()
+    {
+        SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
+                 ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+        Cursor = Cursors.Hand;
+        Size = new Size(42, 22);
+    }
+
+    protected override void OnMouseEnter(EventArgs e) { _hovered = true; Invalidate(); base.OnMouseEnter(e); }
+    protected override void OnMouseLeave(EventArgs e) { _hovered = false; Invalidate(); base.OnMouseLeave(e); }
+    protected override void OnClick(EventArgs e)
+    {
+        if (!Enabled) return;
+        Checked = !Checked;
+        base.OnClick(e);
+    }
+
+    protected override void OnPaintBackground(PaintEventArgs e)
+    {
+        using var br = new SolidBrush(Parent?.BackColor ?? FluentTheme.Surface);
+        e.Graphics.FillRectangle(br, ClientRectangle);
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics;
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        g.PixelOffsetMode = PixelOffsetMode.Half;
+
+        var track = new RectangleF(0.5f, 0.5f, Width - 1, Height - 1);
+        using var path = Geom.RoundRect(track, Height / 2f);
+        var bg = !Enabled
+            ? (FluentTheme.IsDarkMode() ? Color.FromArgb(45, 45, 45) : Color.FromArgb(230, 230, 230))
+            : _checked
+            ? (_hovered ? FluentTheme.AccentHover : FluentTheme.Accent)
+            : (_hovered ? FluentTheme.NeutralBtnH : FluentTheme.NeutralBtn);
+
+        using (var br = new SolidBrush(bg)) g.FillPath(br, path);
+        using (var pen = new Pen(_checked ? Color.FromArgb(45, 0, 0, 0) : FluentTheme.InputBorder, 1f))
+            g.DrawPath(pen, path);
+
+        var knobSize = Height - 8;
+        var knobX = _checked ? Width - knobSize - 4 : 4;
+        using var knobBrush = new SolidBrush(_checked ? Color.White : FluentTheme.TextMuted);
+        g.FillEllipse(knobBrush, new RectangleF(knobX, 4, knobSize, knobSize));
+    }
+}
+
 // ── TrayMenuItem ──────────────────────────────────────────────────────────────
 // Full-width row for the tray popup: icon glyph + label, hover highlight.
 

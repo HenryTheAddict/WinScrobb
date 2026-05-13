@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Windows.Media;
 
@@ -25,11 +24,9 @@ public static class iTunesSource
 
     public static MediaSnapshot? GetSnapshot()
     {
-        if (Process.GetProcessesByName("iTunes").Length == 0)
-            return null;
-
-        // Only use GetActiveObject (ROT lookup) — CreateInstance via ProgID can
-        // relaunch iTunes if it deregistered from the ROT after quitting.
+        // ROT lookup only. A process-name gate is brittle across classic, Store,
+        // and compatibility-launched iTunes builds; CreateInstance can relaunch
+        // iTunes after the user intentionally quits.
         dynamic? iTunes = TryGetActiveObject();
         if (iTunes == null) return null;
 
@@ -41,15 +38,20 @@ public static class iTunesSource
             dynamic? track = iTunes.CurrentTrack;
             if (track == null) return null;
 
-            string title  = (string)(track.Name   ?? "");
-            string artist = (string)(track.Artist  ?? "");
-            string album  = (string)(track.Album   ?? "");
+            string title  = ReadString(() => track.Name);
+            string artist = ReadString(() => track.Artist);
+            string album  = ReadString(() => track.Album);
+
+            if (string.IsNullOrWhiteSpace(artist))
+                artist = ReadString(() => track.AlbumArtist);
+            if (string.IsNullOrWhiteSpace(artist))
+                artist = ReadString(() => track.Composer);
 
             if (string.IsNullOrWhiteSpace(title)) return null;
 
             double duration = 0, position = 0;
-            try { duration = (double)track.Duration; }        catch { }
-            try { position = (double)iTunes.PlayerPosition; } catch { }
+            try { duration = Convert.ToDouble(track.Duration); }        catch { }
+            try { position = Convert.ToDouble(iTunes.PlayerPosition); } catch { }
 
             return new MediaSnapshot(
                 Title:           title,
@@ -64,6 +66,12 @@ public static class iTunesSource
         catch { return null; }
     }
 
+    private static string ReadString(Func<dynamic?> read)
+    {
+        try { return Convert.ToString(read()) ?? ""; }
+        catch { return ""; }
+    }
+
     private static dynamic? TryGetActiveObject()
     {
         try
@@ -74,5 +82,4 @@ public static class iTunesSource
         }
         catch { return null; }
     }
-
 }

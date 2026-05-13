@@ -1,356 +1,437 @@
-using System.Drawing.Drawing2D;
-
 namespace WinScrobb;
 
 public class SettingsForm : Form
 {
-    // ── Controls ──────────────────────────────────────────────────────────────
-    private readonly FluentInput  _apiKey    = new();
-    private readonly FluentInput  _apiSecret = new() { IsPassword = true };
-    private readonly FluentButton _saveBtn   = new() { IsAccent = true };
+    private readonly FluentInput _apiKey = new();
+    private readonly FluentInput _apiSecret = new() { IsPassword = true };
+    private readonly FluentButton _saveBtn = new() { IsAccent = true };
     private readonly FluentButton _cancelBtn = new() { Text = "Cancel" };
-    private readonly Label        _statusLbl = new();
-    private readonly CheckBox     _startupCb = new();
-    private readonly CheckBox     _ipodEnableCb   = new();
-    private readonly CheckBox     _ipodAutoSyncCb = new();
-    private readonly Label        _ipodStatusLbl  = new();
-    private CheckBox?             _retroIconCb;
+    private readonly Label _statusLbl = new();
+
+    private readonly FluentToggle _startupToggle = new();
+    private readonly FluentToggle _ipodEnableToggle = new();
+    private readonly FluentToggle _ipodAutoSyncToggle = new();
+    private readonly FluentToggle _retroIconToggle = new();
+
+    private Panel? _mainHost;
+    private FlowLayoutPanel? _content;
 
     public AppConfig Config { get; }
     private readonly string _origApiKey;
     private readonly string _origApiSecret;
 
+    private const int MinW = 760;
+    private const int MinH = 620;
+    private const int SideW = 184;
+    private const int Pad = 24;
+
     public SettingsForm(AppConfig existing)
     {
-        Config         = existing;
-        _origApiKey    = existing.ApiKey ?? "";
+        Config = existing;
+        _origApiKey = existing.ApiKey ?? "";
         _origApiSecret = existing.ApiSecret ?? "";
         Build();
     }
-
-    // ── Layout constants ──────────────────────────────────────────────────────
-
-    private const int W     = 500;   // client width
-    private const int Pad   = 24;    // outer horizontal padding
-    private const int CardW = W - Pad * 2;
-
-    // ── Build ─────────────────────────────────────────────────────────────────
 
     private void Build()
     {
         SuspendLayout();
 
-        Text            = "WinScrobb — Settings";
+        Text = "WinScrobb Settings";
         FormBorderStyle = FormBorderStyle.Sizable;
-        MaximizeBox     = false;
-        MinimizeBox     = false;
-        StartPosition   = FormStartPosition.CenterScreen;
-        ClientSize      = new Size(W, 620);
-        MinimumSize     = new Size(W, 460);
-        BackColor       = FluentTheme.Surface;
-        ForeColor       = FluentTheme.TextPrimary;
-        Font            = FluentTheme.Body();
-
+        MaximizeBox = false;
+        MinimizeBox = false;
+        StartPosition = FormStartPosition.CenterScreen;
+        ClientSize = new Size(MinW, MinH);
+        MinimumSize = new Size(680, 540);
+        BackColor = FluentTheme.Surface;
+        ForeColor = FluentTheme.TextPrimary;
+        Font = FluentTheme.Body();
         SetIcon();
 
-        // ── Footer (status + buttons), sticky at bottom ───────────────────────
-        var footer = new Panel { Dock = DockStyle.Bottom, Height = 88, BackColor = FluentTheme.Surface };
+        var sidebar = BuildSidebar();
+        Controls.Add(sidebar);
+        Controls.Add(new Panel { Dock = DockStyle.Left, Width = 1, BackColor = FluentTheme.Divider });
 
-        _cancelBtn.Size = new Size(110, 34);
-        _saveBtn.Size   = new Size(152, 34);
-        _cancelBtn.Font = FluentTheme.Body(9.5f);
-        _saveBtn.Font   = FluentTheme.Body(9.5f);
-        _cancelBtn.Click += (_, _) => DialogResult = DialogResult.Cancel;
-        _saveBtn.Click   += OnSave;
-        footer.Controls.Add(_cancelBtn);
-        footer.Controls.Add(_saveBtn);
-
-        _statusLbl.Font      = FluentTheme.Caption(8.5f);
-        _statusLbl.ForeColor = FluentTheme.TextMuted;
-        _statusLbl.AutoSize  = false;
-        _statusLbl.Size      = new Size(W - Pad * 2, 16);
-        _statusLbl.BackColor = FluentTheme.Surface;
-        footer.Controls.Add(_statusLbl);
-
-        footer.Layout += (_, _) =>
-        {
-            _cancelBtn.Location = new Point(footer.Width - Pad - _cancelBtn.Width - _saveBtn.Width - 8, 22);
-            _saveBtn.Location   = new Point(footer.Width - Pad - _saveBtn.Width, 22);
-            _statusLbl.Location = new Point(Pad, footer.Height - 28);
-            _statusLbl.Width    = footer.Width - Pad * 2;
-        };
-
+        var footer = BuildFooter();
         Controls.Add(footer);
         Controls.Add(new Panel { Dock = DockStyle.Bottom, Height = 1, BackColor = FluentTheme.Divider });
 
-        // ── Header (logo + title), sticky at top ──────────────────────────────
-        var header = new Panel { Dock = DockStyle.Top, Height = 86, BackColor = FluentTheme.Surface };
-        BuildHeader(header);
-        Controls.Add(header);
-        Controls.Add(new Panel { Dock = DockStyle.Top, Height = 1, BackColor = FluentTheme.Divider });
-
-        // ── Stack of collapsible sections (scrollable) ────────────────────────
-        var stack = new FlowLayoutPanel
+        _mainHost = new Panel
         {
-            Dock          = DockStyle.Fill,
-            FlowDirection = FlowDirection.TopDown,
-            WrapContents  = false,
-            AutoScroll    = true,
-            Padding       = new Padding(Pad, 8, Pad, 8),
-            BackColor     = FluentTheme.Surface,
+            Dock = DockStyle.Fill,
+            BackColor = FluentTheme.Surface,
         };
-        Controls.Add(stack);
+        Controls.Add(_mainHost);
 
-        // Collapse the account section if creds are already configured — the user
-        // rarely needs to change them after initial setup.
-        bool alreadyAuth = Config.IsConfigured && Config.IsAuthenticated;
+        _content = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            FlowDirection = FlowDirection.TopDown,
+            WrapContents = false,
+            AutoScroll = true,
+            Padding = new Padding(Pad, 20, Pad, 20),
+            BackColor = FluentTheme.Surface,
+        };
+        _mainHost.Controls.Add(_content);
 
-        AddSection(stack, "Last.fm account",  BuildAccountCard(),     expanded: !alreadyAuth);
-        AddSection(stack, "Behavior",         BuildBehaviorCard(),    expanded: true);
-        AddSection(stack, "iPod",             BuildIPodCard(),        expanded: true);
+        _content.Controls.Add(BuildHero());
+        _content.Controls.Add(BuildAccountPanel());
+        _content.Controls.Add(BuildBehaviorPanel());
+        _content.Controls.Add(BuildIPodPanel());
         if (Config.RetroIconUnlocked)
-            AddSection(stack, "Personalization", BuildPersonalizeCard(), expanded: false);
+            _content.Controls.Add(BuildPersonalizationPanel());
 
-        // Wire up dynamic save-button text after all controls exist
-        _apiKey.ValueChanged    += (_, _) => UpdateSaveBtnText();
+        _content.SizeChanged += (_, _) => ResizeContentCards();
+        ResizeContentCards();
+
+        _apiKey.ValueChanged += (_, _) => UpdateSaveBtnText();
         _apiSecret.ValueChanged += (_, _) => UpdateSaveBtnText();
         UpdateSaveBtnText();
 
         ResumeLayout(false);
     }
 
-    private void BuildHeader(Panel header)
+    private Panel BuildFooter()
     {
+        var footer = new Panel { Dock = DockStyle.Bottom, Height = 74, BackColor = FluentTheme.Surface };
+
+        _statusLbl.Font = FluentTheme.Caption(8.5f);
+        _statusLbl.ForeColor = FluentTheme.TextMuted;
+        _statusLbl.AutoSize = false;
+        _statusLbl.BackColor = FluentTheme.Surface;
+        footer.Controls.Add(_statusLbl);
+
+        _cancelBtn.Size = new Size(104, 34);
+        _saveBtn.Size = new Size(150, 34);
+        _cancelBtn.Font = FluentTheme.Body(9.5f);
+        _saveBtn.Font = FluentTheme.Body(9.5f);
+        _cancelBtn.Click += (_, _) => DialogResult = DialogResult.Cancel;
+        _saveBtn.Click += OnSave;
+        footer.Controls.Add(_cancelBtn);
+        footer.Controls.Add(_saveBtn);
+
+        footer.Layout += (_, _) =>
+        {
+            _saveBtn.Location = new Point(footer.Width - Pad - _saveBtn.Width, 20);
+            _cancelBtn.Location = new Point(_saveBtn.Left - _cancelBtn.Width - 8, 20);
+            _statusLbl.Location = new Point(Pad, 28);
+            _statusLbl.Size = new Size(Math.Max(60, _cancelBtn.Left - Pad - 16), 20);
+        };
+
+        return footer;
+    }
+
+    private Panel BuildSidebar()
+    {
+        var sidebar = new Panel { Dock = DockStyle.Left, Width = SideW, BackColor = FluentTheme.Surface };
+
         var logoPath = FluentTheme.FindAsset("logosmall.png");
         if (logoPath != null)
-            header.Controls.Add(new PictureBox
+            sidebar.Controls.Add(new PictureBox
             {
-                Image     = Image.FromFile(logoPath),
-                SizeMode  = PictureBoxSizeMode.Zoom,
-                Size      = new Size(38, 38),
-                Location  = new Point(Pad, 22),
+                Image = Image.FromFile(logoPath),
+                SizeMode = PictureBoxSizeMode.Zoom,
+                Size = new Size(38, 38),
+                Location = new Point(22, 24),
                 BackColor = Color.Transparent,
             });
 
-        header.Controls.Add(new Label
+        sidebar.Controls.Add(new Label
         {
-            Text      = "WinScrobb",
-            Font      = FluentTheme.Display(18f),
+            Text = "WinScrobb",
+            Font = FluentTheme.Subtitle(12.5f),
             ForeColor = FluentTheme.TextPrimary,
-            AutoSize  = true,
-            Location  = new Point(logoPath != null ? 70 : Pad, 20),
+            AutoSize = true,
+            Location = new Point(68, 26),
             BackColor = Color.Transparent,
         });
-        header.Controls.Add(new Label
-        {
-            Text      = "Settings",
-            Font      = FluentTheme.Caption(8.5f),
-            ForeColor = FluentTheme.TextMuted,
-            AutoSize  = true,
-            Location  = new Point(logoPath != null ? 71 : Pad + 1, 50),
-            BackColor = Color.Transparent,
-        });
-    }
 
-    private void AddSection(FlowLayoutPanel host, string title, Control content, bool expanded)
-    {
-        var section = new CollapsibleSection(title, expanded)
+        var byline = new LinkLabel
         {
-            Width  = host.ClientSize.Width - host.Padding.Horizontal,
-            Margin = new Padding(0, 4, 0, 12),
+            Text = "an app by h3",
+            Font = FluentTheme.Caption(8.5f),
+            LinkColor = FluentTheme.Accent,
+            ActiveLinkColor = FluentTheme.AccentPress,
+            VisitedLinkColor = FluentTheme.Accent,
+            AutoSize = true,
+            Location = new Point(70, 48),
+            BackColor = Color.Transparent,
         };
-        section.AddContent(content);
+        byline.LinkClicked += (_, _) => System.Diagnostics.Process.Start(
+            new System.Diagnostics.ProcessStartInfo("https://h3nry.xyz") { UseShellExecute = true });
+        sidebar.Controls.Add(byline);
 
-        host.SizeChanged += (_, _) =>
-            section.Width = host.ClientSize.Width - host.Padding.Horizontal;
+        var navTop = 104;
+        sidebar.Controls.Add(NavItem("Account", "\uE77B", navTop, true, "account"));
+        sidebar.Controls.Add(NavItem("Behavior", "\uE713", navTop + 42, false, "behavior"));
+        sidebar.Controls.Add(NavItem("iPod sync", "\uE8E5", navTop + 84, false, "ipod"));
+        if (Config.RetroIconUnlocked)
+            sidebar.Controls.Add(NavItem("Style", "\uE771", navTop + 126, false, "style"));
 
-        host.Controls.Add(section);
+        return sidebar;
     }
 
-    // ── Account card (API key + secret + helper link) ─────────────────────────
-    private Control BuildAccountCard()
+    private Control NavItem(string text, string glyph, int top, bool selected, string targetTag)
     {
-        var panel = new Panel { Width = CardW, Height = 220, BackColor = FluentTheme.Surface };
+        var item = new Panel
+        {
+            Size = new Size(SideW - 22, 34),
+            Location = new Point(11, top),
+            Cursor = Cursors.Hand,
+            BackColor = selected
+                ? (FluentTheme.IsDarkMode() ? Color.FromArgb(47, 47, 47) : Color.FromArgb(235, 243, 252))
+                : FluentTheme.Surface,
+        };
+        item.Click += (_, _) => ScrollToSection(targetTag);
 
-        int cy = 4;
-        panel.Controls.Add(RowLabelOnSurface("API Key", 0, cy));
-        cy += 20;
-        _apiKey.Value    = Config.ApiKey;
-        _apiKey.Font     = FluentTheme.Body(9.5f);
-        _apiKey.Size     = new Size(CardW, 38);
-        _apiKey.Location = new Point(0, cy);
-        panel.Controls.Add(_apiKey);
-        cy += 50;
+        var icon = new Label
+        {
+            Text = glyph,
+            Font = new Font("Segoe MDL2 Assets", 10f),
+            ForeColor = selected ? FluentTheme.Accent : FluentTheme.TextMuted,
+            AutoSize = false,
+            Size = new Size(30, 34),
+            TextAlign = ContentAlignment.MiddleCenter,
+            Cursor = Cursors.Hand,
+            BackColor = Color.Transparent,
+        };
+        icon.Click += (_, _) => ScrollToSection(targetTag);
+        item.Controls.Add(icon);
 
-        panel.Controls.Add(RowLabelOnSurface("API Secret", 0, cy));
-        cy += 20;
-        _apiSecret.Value    = Config.ApiSecret;
-        _apiSecret.Font     = FluentTheme.Body(9.5f);
-        _apiSecret.Size     = new Size(CardW, 38);
-        _apiSecret.Location = new Point(0, cy);
-        panel.Controls.Add(_apiSecret);
-        cy += 48;
+        var label = new Label
+        {
+            Text = text,
+            Font = FluentTheme.Body(9.5f),
+            ForeColor = selected ? FluentTheme.TextPrimary : FluentTheme.TextMuted,
+            AutoSize = false,
+            Location = new Point(36, 0),
+            Size = new Size(item.Width - 42, 34),
+            TextAlign = ContentAlignment.MiddleLeft,
+            Cursor = Cursors.Hand,
+            BackColor = Color.Transparent,
+        };
+        label.Click += (_, _) => ScrollToSection(targetTag);
+        item.Controls.Add(label);
+        return item;
+    }
+
+    private void ScrollToSection(string targetTag)
+    {
+        if (_content is null) return;
+        foreach (Control control in _content.Controls)
+        {
+            if (Equals(control.Tag, targetTag))
+            {
+                _content.ScrollControlIntoView(control);
+                break;
+            }
+        }
+    }
+
+    private Control BuildHero()
+    {
+        var hero = new Panel { Height = 72, Margin = new Padding(0, 0, 0, 10), BackColor = FluentTheme.Surface };
+        hero.Controls.Add(new Label
+        {
+            Text = "Settings",
+            Font = FluentTheme.Display(21f),
+            ForeColor = FluentTheme.TextPrimary,
+            AutoSize = true,
+            Location = new Point(0, 3),
+            BackColor = Color.Transparent,
+        });
+        hero.Controls.Add(new Label
+        {
+            Text = Config.IsAuthenticated
+                ? $"Signed in as {Config.Username}"
+                : "Connect Last.fm, sync your iPod, and keep the tray app tidy.",
+            Font = FluentTheme.Body(9.5f),
+            ForeColor = FluentTheme.TextMuted,
+            AutoSize = true,
+            Location = new Point(2, 42),
+            BackColor = Color.Transparent,
+        });
+        return hero;
+    }
+
+    private Control BuildAccountPanel()
+    {
+        var card = Card(208);
+        card.Tag = "account";
+        card.Controls.Add(PanelTitle("Last.fm account", "Only re-authorizes when your key or secret changes.", 20, 16));
+
+        _apiKey.Value = Config.ApiKey;
+        _apiKey.Font = FluentTheme.Body(9.5f);
+        _apiKey.Location = new Point(20, 78);
+        card.Controls.Add(FieldLabel("API key", 20, 56));
+        card.Controls.Add(_apiKey);
+
+        _apiSecret.Value = Config.ApiSecret;
+        _apiSecret.Font = FluentTheme.Body(9.5f);
+        _apiSecret.Location = new Point(20, 142);
+        card.Controls.Add(FieldLabel("API secret", 20, 120));
+        card.Controls.Add(_apiSecret);
 
         var link = new LinkLabel
         {
-            Text      = "Get your API key at last.fm/api/account/create  →",
-            Font      = FluentTheme.Caption(),
-            AutoSize  = true,
-            Location  = new Point(0, cy),
-            BackColor = FluentTheme.Surface,
+            Text = "Create a Last.fm API account",
+            Font = FluentTheme.Caption(),
             LinkColor = FluentTheme.Accent,
+            ActiveLinkColor = FluentTheme.AccentPress,
+            AutoSize = true,
+            BackColor = FluentTheme.Card,
+            Location = new Point(20, 184),
         };
-        link.LinkClicked += (_, _) =>
-            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(
-                "https://www.last.fm/api/account/create") { UseShellExecute = true });
-        panel.Controls.Add(link);
+        link.LinkClicked += (_, _) => System.Diagnostics.Process.Start(
+            new System.Diagnostics.ProcessStartInfo("https://www.last.fm/api/account/create") { UseShellExecute = true });
+        card.Controls.Add(link);
 
-        panel.Height = cy + 24;
-        return panel;
+        return card;
     }
 
-    // ── Behavior card ─────────────────────────────────────────────────────────
-    private Control BuildBehaviorCard()
+    private Control BuildBehaviorPanel()
     {
-        var panel = new Panel { Width = CardW, Height = 40, BackColor = FluentTheme.Surface };
-
-        _startupCb.Text      = "Launch WinScrobb when Windows starts";
-        _startupCb.Font      = FluentTheme.Body(9.5f);
-        _startupCb.ForeColor = FluentTheme.TextPrimary;
-        _startupCb.BackColor = FluentTheme.Surface;
-        _startupCb.Checked   = Config.RunAtStartup;
-        _startupCb.AutoSize  = true;
-        _startupCb.Location  = new Point(0, 4);
-        panel.Controls.Add(_startupCb);
-
-        return panel;
+        var card = Card(104);
+        card.Tag = "behavior";
+        card.Controls.Add(PanelTitle("Behavior", "Choose how WinScrobb behaves in Windows.", 20, 16));
+        _startupToggle.Checked = Config.RunAtStartup;
+        card.Controls.Add(SettingRow("Launch at sign-in", "Start WinScrobb when Windows starts.", _startupToggle, 20, 62));
+        return card;
     }
 
-    // ── iPod card ─────────────────────────────────────────────────────────────
-    private Control BuildIPodCard()
+    private Control BuildIPodPanel()
     {
-        var panel = new Panel { Width = CardW, BackColor = FluentTheme.Surface };
-        int cy = 4;
-
-        // Connection status
+        var card = Card(190);
+        card.Tag = "ipod";
         var connected = IPodDetector.FindConnectedIPods();
-        _ipodStatusLbl.Text = connected.Count == 0
+        var status = connected.Count == 0
             ? "No iPod connected."
-            : $"Connected: {connected[0].Name}"
-              + (connected[0].IsCompressed ? "  (iTunesCDB)" : "  (iTunesDB)");
-        _ipodStatusLbl.Font      = FluentTheme.Caption(8.5f);
-        _ipodStatusLbl.ForeColor = connected.Count == 0
-            ? FluentTheme.TextMuted
-            : FluentTheme.Accent;
-        _ipodStatusLbl.AutoSize  = true;
-        _ipodStatusLbl.Location  = new Point(0, cy);
-        _ipodStatusLbl.BackColor = FluentTheme.Surface;
-        panel.Controls.Add(_ipodStatusLbl);
-        cy += 28;
+            : $"Connected: {connected[0].Name} ({(connected[0].IsCompressed ? "iTunesCDB" : "iTunesDB")})";
 
-        // Enable toggle
-        _ipodEnableCb.Text      = "Enable iPod sync";
-        _ipodEnableCb.Font      = FluentTheme.Body(9.5f);
-        _ipodEnableCb.ForeColor = FluentTheme.TextPrimary;
-        _ipodEnableCb.BackColor = FluentTheme.Surface;
-        _ipodEnableCb.Checked   = Config.IPodSyncEnabled;
-        _ipodEnableCb.AutoSize  = true;
-        _ipodEnableCb.Location  = new Point(0, cy);
-        panel.Controls.Add(_ipodEnableCb);
-        cy += 30;
+        card.Controls.Add(PanelTitle("iPod sync", status, 20, 16));
 
-        // Auto-sync toggle (indented under enable)
-        _ipodAutoSyncCb.Text      = "Automatically sync when connected";
-        _ipodAutoSyncCb.Font      = FluentTheme.Body(9.5f);
-        _ipodAutoSyncCb.ForeColor = FluentTheme.TextPrimary;
-        _ipodAutoSyncCb.BackColor = FluentTheme.Surface;
-        _ipodAutoSyncCb.Checked   = Config.IPodAutoSyncOnConnect;
-        _ipodAutoSyncCb.AutoSize  = true;
-        _ipodAutoSyncCb.Location  = new Point(18, cy);
-        panel.Controls.Add(_ipodAutoSyncCb);
-        cy += 30;
+        _ipodEnableToggle.Checked = Config.IPodSyncEnabled;
+        _ipodAutoSyncToggle.Checked = Config.IPodAutoSyncOnConnect;
+        _ipodEnableToggle.CheckedChanged += (_, _) => RefreshIPodAutoSync();
 
-        // Wire enable toggle to grey out auto-sync
-        void RefreshAutoSync()
-            => _ipodAutoSyncCb.Enabled = _ipodEnableCb.Checked;
-        _ipodEnableCb.CheckedChanged += (_, _) => RefreshAutoSync();
-        RefreshAutoSync();
+        card.Controls.Add(SettingRow("Enable iPod sync", "Read iPod play counts and submit new plays to Last.fm.", _ipodEnableToggle, 20, 70));
+        card.Controls.Add(SettingRow("Auto-sync on connect", "Scrobble automatically when new plays are detected.", _ipodAutoSyncToggle, 20, 120));
+        RefreshIPodAutoSync();
 
-        panel.Controls.Add(new Label
-        {
-            Text      = "Reads new plays from iPod_Control/iTunes/ on any iPod model",
-            Font      = FluentTheme.Caption(8f),
-            ForeColor = FluentTheme.TextMuted,
-            AutoSize  = true,
-            Location  = new Point(0, cy),
-            BackColor = FluentTheme.Surface,
-        });
-        cy += 22;
-
-        panel.Height = cy + 4;
-        return panel;
+        return card;
     }
 
-    // ── Personalization card ──────────────────────────────────────────────────
-    private Control BuildPersonalizeCard()
+    private Control BuildPersonalizationPanel()
     {
-        var panel = new Panel { Width = CardW, Height = 40, BackColor = FluentTheme.Surface };
-
-        _retroIconCb = new CheckBox
-        {
-            Text      = "✦  Use retro tray icon  (unlocked!)",
-            Font      = FluentTheme.Body(9.5f),
-            ForeColor = FluentTheme.Accent,
-            BackColor = FluentTheme.Surface,
-            Checked   = Config.UseRetroIcon,
-            AutoSize  = true,
-            Location  = new Point(0, 4),
-        };
-        panel.Controls.Add(_retroIconCb);
-
-        return panel;
+        var card = Card(104);
+        card.Tag = "style";
+        card.Controls.Add(PanelTitle("Personalization", "Small victories deserve tiny style switches.", 20, 16));
+        _retroIconToggle.Checked = Config.UseRetroIcon;
+        card.Controls.Add(SettingRow("Use retro tray icon", "Unlocked from the logo click ritual.", _retroIconToggle, 20, 62));
+        return card;
     }
 
-    private static Label RowLabelOnSurface(string text, int x, int y) => new()
+    private FluentCard Card(int height) => new()
     {
-        Text      = text,
-        Font      = FluentTheme.Caption(8.5f),
-        ForeColor = FluentTheme.TextMuted,
-        AutoSize  = true,
-        Location  = new Point(x, y),
-        BackColor = FluentTheme.Surface,
-    };
-
-    private static Label SectionLabel(string text, int x, int y) => new()
-    {
-        Text      = text,
-        Font      = FluentTheme.Body(9.5f),
-        ForeColor = FluentTheme.TextMuted,
-        AutoSize  = true,
-        Location  = new Point(x, y),
-        BackColor = Color.Transparent,
-    };
-
-    private static Label RowLabel(string text, int x, int y) => new()
-    {
-        Text      = text,
-        Font      = FluentTheme.Caption(8.5f),
-        ForeColor = FluentTheme.TextMuted,
-        AutoSize  = true,
-        Location  = new Point(x, y),
+        Width = 520,
+        Height = height,
+        Margin = new Padding(0, 0, 0, 14),
         BackColor = FluentTheme.Card,
     };
 
-    // ── Save button text ──────────────────────────────────────────────────────
+    private Control PanelTitle(string title, string subtitle, int x, int y)
+    {
+        var panel = new Panel { Location = new Point(x, y), Size = new Size(460, 36), BackColor = FluentTheme.Card };
+        panel.Controls.Add(new Label
+        {
+            Text = title,
+            Font = FluentTheme.Subtitle(11.5f),
+            ForeColor = FluentTheme.TextPrimary,
+            AutoSize = true,
+            BackColor = FluentTheme.Card,
+        });
+        panel.Controls.Add(new Label
+        {
+            Text = subtitle,
+            Font = FluentTheme.Caption(8.5f),
+            ForeColor = FluentTheme.TextMuted,
+            AutoSize = true,
+            Location = new Point(0, 21),
+            BackColor = FluentTheme.Card,
+        });
+        return panel;
+    }
+
+    private static Label FieldLabel(string text, int x, int y) => new()
+    {
+        Text = text,
+        Font = FluentTheme.Caption(8.5f),
+        ForeColor = FluentTheme.TextMuted,
+        AutoSize = true,
+        Location = new Point(x, y),
+        BackColor = FluentTheme.Card,
+    };
+
+    private Control SettingRow(string title, string subtitle, FluentToggle toggle, int x, int y)
+    {
+        var row = new Panel { Location = new Point(x, y), Size = new Size(460, 42), BackColor = FluentTheme.Card };
+        row.Controls.Add(new Label
+        {
+            Text = title,
+            Font = FluentTheme.Body(9.5f),
+            ForeColor = FluentTheme.TextPrimary,
+            AutoSize = true,
+            Location = new Point(0, 1),
+            BackColor = FluentTheme.Card,
+        });
+        row.Controls.Add(new Label
+        {
+            Text = subtitle,
+            Font = FluentTheme.Caption(8.3f),
+            ForeColor = FluentTheme.TextMuted,
+            AutoSize = true,
+            Location = new Point(0, 22),
+            BackColor = FluentTheme.Card,
+        });
+        toggle.Location = new Point(row.Width - toggle.Width, 10);
+        row.Controls.Add(toggle);
+        row.Resize += (_, _) => toggle.Location = new Point(row.Width - toggle.Width, 10);
+        return row;
+    }
+
+    private void ResizeContentCards()
+    {
+        if (_content is null) return;
+        var width = Math.Max(380, _content.ClientSize.Width - _content.Padding.Horizontal - SystemInformation.VerticalScrollBarWidth - 12);
+        foreach (Control control in _content.Controls)
+        {
+            control.Width = width;
+            foreach (Control child in control.Controls)
+            {
+                if (child is FluentInput input)
+                    input.Width = width - 40;
+                else if (child is Panel panel && panel.Width >= 440)
+                    panel.Width = width - 40;
+            }
+        }
+    }
+
+    private void RefreshIPodAutoSync()
+    {
+        _ipodAutoSyncToggle.Enabled = _ipodEnableToggle.Checked;
+        _ipodAutoSyncToggle.Cursor = _ipodAutoSyncToggle.Enabled ? Cursors.Hand : Cursors.Default;
+        _ipodAutoSyncToggle.Invalidate();
+    }
 
     private void UpdateSaveBtnText()
     {
         bool needsAuth =
-            _apiKey.Value.Trim()    != _origApiKey    ||
+            _apiKey.Value.Trim() != _origApiKey ||
             _apiSecret.Value.Trim() != _origApiSecret ||
             string.IsNullOrEmpty(Config.SessionKey);
 
-        _saveBtn.Text = needsAuth ? "Save && Authorize" : "Save";
+        _saveBtn.Text = needsAuth ? "Save and authorize" : "Save";
     }
 
     private void SetIcon()
@@ -359,60 +440,50 @@ public class SettingsForm : Form
         if (icoPath != null) try { Icon = new Icon(icoPath); } catch { }
     }
 
-    // ── DWM chrome ────────────────────────────────────────────────────────────
-
     protected override void OnHandleCreated(EventArgs e)
     {
         base.OnHandleCreated(e);
         FluentTheme.ApplyChrome(this);
     }
 
-    // ── Auth flow ─────────────────────────────────────────────────────────────
-
     private async void OnSave(object? sender, EventArgs e)
     {
         if (string.IsNullOrWhiteSpace(_apiKey.Value) || string.IsNullOrWhiteSpace(_apiSecret.Value))
         {
-            MessageBox.Show("Both API Key and API Secret are required.", "WinScrobb",
+            MessageBox.Show("Both API key and API secret are required.", "WinScrobb",
                 MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
 
-        var newKey    = _apiKey.Value.Trim();
+        var newKey = _apiKey.Value.Trim();
         var newSecret = _apiSecret.Value.Trim();
         bool credsUnchanged =
-            newKey    == _origApiKey &&
+            newKey == _origApiKey &&
             newSecret == _origApiSecret &&
             !string.IsNullOrEmpty(Config.SessionKey);
 
-        // Fast path: creds unchanged — save toggles only, no Last.fm auth needed
         if (credsUnchanged)
         {
-            Config.RunAtStartup          = _startupCb.Checked;
-            Config.IPodSyncEnabled       = _ipodEnableCb.Checked;
-            Config.IPodAutoSyncOnConnect = _ipodAutoSyncCb.Checked;
-            Config.UseRetroIcon          = _retroIconCb is { Checked: true };
-            Config.Save();
-            Config.ApplyStartup();
+            SaveLocalOptions();
             DialogResult = DialogResult.OK;
             return;
         }
 
         _saveBtn.Enabled = false;
-        Status("Requesting auth token…");
+        Status("Requesting auth token...");
 
-        Config.ApiKey     = newKey;
-        Config.ApiSecret  = newSecret;
+        Config.ApiKey = newKey;
+        Config.ApiSecret = newSecret;
         Config.SessionKey = "";
-        Config.Username   = "";
+        Config.Username = "";
 
         using var client = new LastFmClient(Config.ApiKey, Config.ApiSecret);
         try
         {
             var token = await client.GetTokenAsync();
-            var url   = LastFmClient.AuthUrl(Config.ApiKey, token);
+            var url = LastFmClient.AuthUrl(Config.ApiKey, token);
 
-            Status("Browser opened — authorize WinScrobb, then click Continue.");
+            Status("Browser opened. Authorize WinScrobb, then continue.");
             System.Diagnostics.Process.Start(
                 new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true });
 
@@ -421,18 +492,18 @@ public class SettingsForm : Form
                 "WinScrobb Authorization",
                 MessageBoxButtons.OKCancel, MessageBoxIcon.Information);
 
-            if (result != DialogResult.OK) { _saveBtn.Enabled = true; Status(""); return; }
+            if (result != DialogResult.OK)
+            {
+                _saveBtn.Enabled = true;
+                Status("");
+                return;
+            }
 
-            Status("Completing sign-in…");
+            Status("Completing sign-in...");
             var (sessionKey, username) = await client.GetSessionAsync(token);
-            Config.SessionKey            = sessionKey;
-            Config.Username              = username;
-            Config.RunAtStartup          = _startupCb.Checked;
-            Config.IPodSyncEnabled       = _ipodEnableCb.Checked;
-            Config.IPodAutoSyncOnConnect = _ipodAutoSyncCb.Checked;
-            Config.UseRetroIcon          = _retroIconCb is { Checked: true };
-            Config.Save();
-            Config.ApplyStartup();
+            Config.SessionKey = sessionKey;
+            Config.Username = username;
+            SaveLocalOptions();
             DialogResult = DialogResult.OK;
         }
         catch (Exception ex)
@@ -440,6 +511,16 @@ public class SettingsForm : Form
             _saveBtn.Enabled = true;
             Status($"Error: {ex.Message}");
         }
+    }
+
+    private void SaveLocalOptions()
+    {
+        Config.RunAtStartup = _startupToggle.Checked;
+        Config.IPodSyncEnabled = _ipodEnableToggle.Checked;
+        Config.IPodAutoSyncOnConnect = _ipodEnableToggle.Checked && _ipodAutoSyncToggle.Checked;
+        Config.UseRetroIcon = Config.RetroIconUnlocked && _retroIconToggle.Checked;
+        Config.Save();
+        Config.ApplyStartup();
     }
 
     private void Status(string msg) => _statusLbl.Text = msg;

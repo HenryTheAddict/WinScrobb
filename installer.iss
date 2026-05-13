@@ -1,5 +1,5 @@
 #define MyAppName      "WinScrobb"
-#define MyAppVersion   "1.1.1"
+#define MyAppVersion   "1.2.2"
 #define MyAppPublisher "WinScrobb"
 #define MyAppExeName   "WinScrobb.exe"
 #define PublishDir     "publish"
@@ -34,8 +34,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Additional icons:"
 
 [Files]
-Source: "{#PublishDir}\{#MyAppExeName}";    DestDir: "{app}";        Flags: ignoreversion
-Source: "{#PublishDir}\assets\*";           DestDir: "{app}\assets"; Flags: ignoreversion recursesubdirs
+Source: "{#PublishDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\assets\icon.ico"
